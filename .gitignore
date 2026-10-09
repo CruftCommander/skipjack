@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Skipjack probe reports (each one names a video you watched)
+probe/reports/

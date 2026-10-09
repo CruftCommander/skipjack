@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Skipjack probe",
+  "version": "0.0.6",
+  "description": "Step 1 spike: reports which sponsor-detection signals a content script can read on a YouTube watch page. Reads only, skips nothing.",
+  "minimum_chrome_version": "111",
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["probe.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
