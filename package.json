@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
     "check": "npm run typecheck && npm test && npm run build",
-    "eval": "node scripts/eval.mjs"
+    "eval": "node scripts/eval.mjs",
+    "e2e": "npm run build && node test/e2e/detect.mjs && node test/e2e/sponsorblock.mjs"
   },
   "devDependencies": {
     "@types/chrome": "0.3.5",
