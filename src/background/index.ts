@@ -12,6 +12,17 @@ import { DetectionService } from './detection';
 import { SegmentService } from './segments';
 
 const shell = createWebExtShell();
+
+// Hide local storage from content scripts. Without this, a compromised YouTube renderer running
+// Skipjack's content script could read the API key or reset the hourly detection budget. Nothing in
+// the content scripts uses local storage. Applied on every start of the background script, and the
+// startup listener makes the script start with the browser, so the restriction is in place before
+// a YouTube tab loads whether or not the browser keeps it between sessions.
+const restrictLocalStorage = (): void =>
+  void shell.restrictLocalStorage().catch((error: unknown) => console.warn('[Skipjack] could not restrict local storage:', error));
+restrictLocalStorage();
+shell.onStartup(restrictLocalStorage);
+
 const segments = new SegmentService([createSponsorBlockSource()]);
 const detection = new DetectionService(shell, providerForModel, async (provider) => {
   const key = await shell.getLocal(apiKeyStorageKey(provider.id));

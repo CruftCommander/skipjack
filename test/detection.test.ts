@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cacheKey, DETECTION_STATUS_KEY, DetectionService, HOURLY_LIMIT } from '../src/background/detection';
-import { isDetectRequest, MAX_CHAPTERS, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../src/core/messages';
+import { cacheKey, DetectionService, HOURLY_LIMIT } from '../src/background/detection';
+import { DETECTION_STATUS_KEY, detectionCacheKeys, isDetectRequest, MAX_CHAPTERS, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../src/core/messages';
 import { normalizeSettings } from '../src/core/settings';
 import { DETECTION_SOURCE, mergeSources, missingCategories, shouldDetect } from '../src/core/sources';
 import { SpentError, type DetectionInput, type LlmProvider } from '../src/llm/provider';
@@ -218,4 +218,171 @@ test('DetectionService prunes the oldest results past its limit', async () => {
   assert.equal(keys.length, 2000);
   assert.ok(!keys.includes('det:youtube:old00000000'));
   assert.ok(keys.includes(cacheKey(input.media)));
+});
+
+// Follow-up to the 2026-10-21 self-review of 201e6de.
+
+const model = 'claude-sonnet-5-5';
+
+/** A provider whose detect() is scripted per test. */
+function scripted(run: LlmProvider['detect']): LlmProvider {
+  return { id: 'anthropic', label: 'Anthropic', models: [{ id: model, label: 'Sonnet' }], detect: run };
+}
+
+/** Waits for the signal, then throws what fetch() or the provider would. */
+const untilAborted = (signal: AbortSignal | undefined, error: () => Error): Promise<never> =>
+  new Promise((_r, reject) => signal?.addEventListener('abort', () => reject(error())));
+const abortError = () => new DOMException('The operation was aborted.', 'AbortError') as Error;
+
+const ok = { model, usage: { inputTokens: 10, outputTokens: 2 }, segments: [{ category: 'sponsor' as const, start: 5, end: 25, confidence: 0.9 }] };
+
+test('a timeout before the provider accepted the request is not held; the next visit tries again', async () => {
+  const shell = fakeShell();
+  let calls = 0;
+  const provider = scripted(async (_i, o) => {
+    calls++;
+    return untilAborted(o.signal, abortError);
+  });
+  const service = new DetectionService(shell, () => provider, async () => 'k', undefined, { idleTimeoutMs: 20 });
+  const r = await service.detect(input, model);
+  assert.ok(!r.ok && /timed out before Anthropic accepted/.test(r.error));
+  assert.equal(shell.local[cacheKey(input.media)], undefined);
+  await service.detect(input, model);
+  assert.equal(calls, 2);
+});
+
+test('a timeout after the provider accepted the request holds the video for a day', async () => {
+  const shell = fakeShell();
+  let calls = 0;
+  const provider = scripted(async (_i, o) => {
+    calls++;
+    o.onActivity?.();
+    return untilAborted(o.signal, () => new SpentError('Anthropic: timed out while the response was streaming'));
+  });
+  const service = new DetectionService(shell, () => provider, async () => 'k', undefined, { idleTimeoutMs: 20 });
+  const r = await service.detect(input, model);
+  assert.ok(!r.ok && /timed out after Anthropic accepted/.test(r.error));
+  const again = await service.detect(input, model);
+  assert.ok(!again.ok && /within the last day/.test(again.error));
+  assert.equal(calls, 1);
+});
+
+test('the timeout is an idle timeout: activity keeps a slow detection going, up to the total limit', async () => {
+  const steady = scripted(async (_i, o) => {
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      o.onActivity?.();
+    }
+    return ok;
+  });
+  // 80 ms in all, but never 30 ms without activity.
+  const r = await new DetectionService(fakeShell(), () => steady, async () => 'k', undefined, { idleTimeoutMs: 30 }).detect(input, model);
+  assert.ok(r.ok, JSON.stringify(r));
+
+  const endless = scripted(async (_i, o) => {
+    const t = setInterval(() => o.onActivity?.(), 5);
+    try {
+      return await untilAborted(o.signal, () => new SpentError('Anthropic: timed out while the response was streaming'));
+    } finally {
+      clearInterval(t);
+    }
+  });
+  const capped = await new DetectionService(fakeShell(), () => endless, async () => 'k', undefined, { idleTimeoutMs: 30, totalTimeoutMs: 60 }).detect(input, model);
+  assert.ok(!capped.ok && /timed out/.test(capped.error));
+});
+
+test('the background is kept alive while any detection runs, and only then', async () => {
+  const shell = fakeShell();
+  const timers: { fn: () => void; stopped: boolean }[] = [];
+  const every = (fn: () => void) => {
+    const t = { fn, stopped: false };
+    timers.push(t);
+    return () => void (t.stopped = true);
+  };
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((r) => (release = r));
+  const provider = scripted(async () => {
+    await gate;
+    return ok;
+  });
+  const service = new DetectionService(shell, () => provider, async () => 'k', undefined, { every });
+  const a = service.detect(input, model);
+  const b = service.detect({ ...input, media: { platform: 'youtube', id: 'zzzzzzzzzzz' } }, model);
+  await new Promise((r) => setTimeout(r, 5));
+  // One timer for both detections.
+  assert.equal(timers.length, 1);
+  timers[0]!.fn();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(shell.keepAlives, 1);
+  assert.equal(timers[0]!.stopped, false);
+  release();
+  await Promise.all([a, b]);
+  assert.equal(timers[0]!.stopped, true);
+  // A cached answer is quick; it still starts and stops a timer cleanly.
+  await service.detect(input, model);
+  assert.ok(timers.every((t) => t.stopped));
+});
+
+test('status records the hourly limit and an unknown model for the settings page, once per message', async () => {
+  const shell = fakeShell();
+  let now = 1_000_000_000_000;
+  shell.local.detectionBudget = Array.from({ length: HOURLY_LIMIT }, () => now - 1000);
+  shell.local[DETECTION_STATUS_KEY] = { at: now - 5000, ok: true, message: '1 segment(s) found with claude-sonnet-5-5' };
+  const service = new DetectionService(shell, () => fakeProvider({ n: 0 }), async () => 'k', () => now);
+  const s = await service.status(input.media, model);
+  assert.ok(!s.ok);
+  const recorded = shell.local[DETECTION_STATUS_KEY] as { at: number; ok: boolean; message: string };
+  assert.equal(recorded.ok, false);
+  assert.match(recorded.message, /limit of 60 detections an hour/);
+  now += 1000;
+  await service.status({ platform: 'youtube', id: 'other000000' }, model);
+  assert.equal((shell.local[DETECTION_STATUS_KEY] as { at: number }).at, recorded.at, 'the same refusal is not rewritten');
+
+  const unknown = new DetectionService(shell, () => null, async () => 'k', () => now);
+  await unknown.status(input.media, 'claude-future-9');
+  assert.match((shell.local[DETECTION_STATUS_KEY] as { message: string }).message, /claude-future-9/);
+});
+
+test('a failure hold applies only to the model that failed', async () => {
+  const shell = fakeShell();
+  const calls = { n: 0 };
+  let fail: boolean | 'spent' = 'spent';
+  const service = new DetectionService(shell, () => fakeProvider(calls, fail), async () => 'k');
+  await service.detect(input, 'claude-sonnet-5-5');
+  const held = await service.status(input.media, 'claude-sonnet-5-5');
+  assert.ok(!held.ok && /within the last day/.test(held.error));
+  const other = await service.status(input.media, 'claude-haiku-5-5');
+  assert.ok(other.ok && other.cached === null);
+  fail = false;
+  const r = await service.detect(input, 'claude-haiku-5-5');
+  assert.ok(r.ok && !r.cached);
+  assert.equal(calls.n, 2);
+});
+
+test('a paid result is used even when saving it fails', async () => {
+  const shell = fakeShell();
+  const set = shell.setLocalItems;
+  shell.setLocalItems = async (items) => {
+    if (Object.keys(items).some((k) => k.startsWith('det:'))) throw new Error('QUOTA_BYTES quota exceeded');
+    return set(items);
+  };
+  shell.getAllLocal = async () => {
+    throw new Error('storage unavailable');
+  };
+  const service = new DetectionService(shell, () => fakeProvider({ n: 0 }), async () => 'k');
+  const r = await service.detect(input, model);
+  assert.ok(r.ok && r.segments.length === 1, JSON.stringify(r));
+  assert.equal((shell.local[DETECTION_STATUS_KEY] as { ok: boolean }).ok, true);
+});
+
+test('Clear detection cache removes results, failure holds, and the last status, and nothing else', () => {
+  const keys = detectionCacheKeys({
+    'det:youtube:aaaaaaaaaaa': {},
+    'det:youtube:bbbbbbbbbbb': { failed: 'x' },
+    [DETECTION_STATUS_KEY]: {},
+    'apiKey:anthropic': 'sk-ant-x',
+    detectionBudget: [],
+    settings: {},
+  });
+  assert.deepEqual(keys.sort(), ['det:youtube:aaaaaaaaaaa', 'det:youtube:bbbbbbbbbbb', DETECTION_STATUS_KEY].sort());
 });

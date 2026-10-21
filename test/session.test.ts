@@ -6,7 +6,7 @@ import { normalizeSettings } from '../src/core/settings';
 import { Session } from '../src/content/session';
 import type { PlatformAdapter } from '../src/platforms/platform';
 import type { Toast } from '../src/ui/toast';
-import { fakeShell } from './helpers';
+import { FakeMedia, fakeShell } from './helpers';
 
 const X = 'UCxxxxxxxxxxxxxxxxxxxxxx';
 const Y = 'UCyyyyyyyyyyyyyyyyyyyyyy';
@@ -74,4 +74,75 @@ test('a hold-back based on stale channel data is re-checked and resumes', async 
   await sleep(2300);
   assert.equal(t.lookups(), 1);
   s.destroy();
+});
+
+// Detection in a session: what the content script does with the background's answers.
+
+function detectSetup(answer: (type: string) => Promise<unknown>) {
+  const shell = fakeShell();
+  const sent: string[] = [];
+  shell.sendMessage = (async (m: { type: string }) => {
+    sent.push(m.type);
+    return answer(m.type);
+  }) as typeof shell.sendMessage;
+  let transcripts = 0;
+  const media = new FakeMedia();
+  const adapter = {
+    id: 'youtube',
+    channelOf: () => null,
+    findMediaElement: () => media,
+    canSkipNow: () => true,
+    lengthOf: () => 600,
+    cancelTranscript: () => undefined,
+    readTranscript: async () => {
+      transcripts++;
+      return {
+        ok: true,
+        input: { media: { platform: 'youtube', id: 'abcdefghijk' }, durationSeconds: 600, transcript: [{ start: 1, duration: 1, text: 'x' }], signals: {} },
+      };
+    },
+  } as unknown as PlatformAdapter;
+  const session = new Session({ platform: 'youtube', id: 'abcdefghijk' }, adapter, shell, new ChannelStore(shell), normalizeSettings(undefined), [], toast);
+  return { session, sent, transcripts: () => transcripts, segments: () => (session as unknown as { segments: unknown[] }).segments };
+}
+
+const community = { ok: true, segments: [], sources: ['test'] };
+const detected = { ok: true, cached: false, inputTokens: 1, outputTokens: 1, segments: [{ id: 'd', category: 'sponsor', start: 10, end: 40, source: 'detection' }] };
+
+test('a refused detection status touches no captions and sends no transcript', async () => {
+  const t = detectSetup(async (type) =>
+    type === 'getSegments' ? community : type === 'detectionStatus' ? { ok: false, error: 'The limit of 60 detections an hour is reached.' } : detected,
+  );
+  try {
+    await sleep(600);
+    assert.deepEqual(t.sent, ['getSegments', 'detectionStatus']);
+    assert.equal(t.transcripts(), 0);
+  } finally {
+    t.session.destroy();
+  }
+});
+
+test('a detection that returns after the user switched detection off is not applied', async () => {
+  let finish: (v: unknown) => void = () => undefined;
+  const late = new Promise((r) => (finish = r));
+  const t = detectSetup(async (type) => (type === 'getSegments' ? community : type === 'detectionStatus' ? { ok: true, cached: null, keySet: true } : late));
+  try {
+    await sleep(600);
+    assert.deepEqual(t.sent, ['getSegments', 'detectionStatus', 'detect']);
+    t.session.updateSettings(normalizeSettings({ detection: { mode: 'off' } }));
+    finish(detected);
+    await sleep(50);
+    assert.equal(t.segments().length, 0);
+  } finally {
+    t.session.destroy();
+  }
+
+  // Control: with detection still on, the same reply is applied.
+  const on = detectSetup(async (type) => (type === 'getSegments' ? community : type === 'detectionStatus' ? { ok: true, cached: null, keySet: true } : detected));
+  try {
+    await sleep(600);
+    assert.equal(on.segments().length, 1);
+  } finally {
+    on.session.destroy();
+  }
 });

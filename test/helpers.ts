@@ -79,14 +79,20 @@ export class FakeTimers implements Timers {
 }
 
 /** An in-memory synced storage behind the BrowserShell interface. */
-export function fakeShell(): BrowserShell & { items: Record<string, unknown>; local: Record<string, unknown> } {
+export function fakeShell(): BrowserShell & { items: Record<string, unknown>; local: Record<string, unknown>; keepAlives: number } {
   const items: Record<string, unknown> = {};
   const local: Record<string, unknown> = {};
   const listeners: ((keys: string[]) => void)[] = [];
   const fire = (keys: string[]): void => listeners.forEach((l) => l(keys));
-  return {
+  const shell = {
     items,
     local,
+    keepAlives: 0,
+    keepAlive: async () => {
+      shell.keepAlives++;
+    },
+    restrictLocalStorage: async () => true,
+    onStartup: () => undefined,
     getLocal: async (k) => local[k],
     getAllLocal: async () => ({ ...local }),
     setLocalItems: async (o) => void Object.assign(local, o),
@@ -116,6 +122,7 @@ export function fakeShell(): BrowserShell & { items: Record<string, unknown>; lo
     sendToActiveTab: async () => null,
     openOptionsPage: async () => undefined,
     isAlive: () => true,
-  };
+  } satisfies BrowserShell & { items: Record<string, unknown>; local: Record<string, unknown>; keepAlives: number };
+  return shell;
 }
 

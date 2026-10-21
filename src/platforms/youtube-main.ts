@@ -14,7 +14,9 @@ import {
   PLAYER_CHANNEL_NAME_ATTR,
   PLAYER_QUERY_EVENT,
   PLAYER_VIDEO_ATTR,
+  playerMediaLength,
   PROMO_LINE,
+  shouldRestoreCaptions,
   TRANSCRIPT_CANCEL_EVENT,
   TRANSCRIPT_MESSAGE_SOURCE,
   TRANSCRIPT_REQUEST_ATTR,
@@ -32,7 +34,6 @@ interface PlayerResponse {
     lengthSeconds?: unknown;
     shortDescription?: unknown;
     isLive?: unknown;
-    isLiveContent?: unknown;
   };
   microformat?: { playerMicroformatRenderer?: { ownerProfileUrl?: unknown } };
   captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: unknown[] } };
@@ -49,12 +50,7 @@ const player = (): YouTubePlayer | null => document.getElementById('movie_player
 const playingVideoId = (): string => text(player()?.getVideoData?.()?.video_id);
 
 /** The media's length from the player response: the <video> element may be playing an ad. 0 for live. */
-function lengthOf(response: PlayerResponse | undefined): number {
-  const d = response?.videoDetails;
-  if (!d || d.isLive === true || d.isLiveContent === true) return 0;
-  const n = Number(text(d.lengthSeconds));
-  return Number.isFinite(n) ? n : 0;
-}
+const lengthOf = (response: PlayerResponse | undefined): number => playerMediaLength(response?.videoDetails);
 
 function set(name: string, value: string): void {
   const root = document.documentElement;
@@ -104,7 +100,19 @@ document.addEventListener(PLAYER_QUERY_EVENT, () => {
 // Resource timing reports every request the page makes, including the player's caption requests.
 
 const playerCaptionUrls: string[] = [];
+/** Caption URLs Skipjack fetched itself, so they are never mistaken for the player's. */
 const ownFetches = new Set<string>();
+const OWN_FETCHES_MAX = 50;
+const CAPTION_FETCH_TIMEOUT_MS = 15_000;
+
+function rememberOwnFetch(url: string): void {
+  ownFetches.add(url);
+  // A Set iterates in insertion order, so the first entries are the oldest.
+  for (const old of ownFetches) {
+    if (ownFetches.size <= OWN_FETCHES_MAX) break;
+    ownFetches.delete(old);
+  }
+}
 try {
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
@@ -159,27 +167,59 @@ function hideCaptionOverlay(): (() => void) | null {
 }
 
 /**
+ * Watches for the viewer changing captions themselves while Skipjack has them switched: a click on
+ * the captions button or in the player's settings menu, or the C shortcut. Skipjack's own clicks are
+ * untrusted events, so only the viewer's input counts. Returns a function that stops watching and
+ * reports whether the viewer touched them.
+ */
+function watchViewerCaptionChanges(button: HTMLElement): () => boolean {
+  let touched = false;
+  const onClick = (e: Event): void => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (e.isTrusted && target && (button.contains(target) || target.closest('.ytp-settings-menu'))) touched = true;
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    const typing = target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '');
+    if (e.isTrusted && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'c') touched = true;
+  };
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKey, true);
+  return () => {
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    return touched;
+  };
+}
+
+/**
  * Switches captions on for a moment, with the overlay hidden, so the player requests them, then puts
- * the viewer's setting back. Returns the URL the player requested, or null. Only the main player's
- * button is used: the hover-preview player has its own.
+ * the viewer's setting back if captions are still where Skipjack left them. Returns the URL the
+ * player requested, or null. Only the main player's button is used: the hover-preview player has its own.
  */
 async function toggleForCaptionUrl(videoId: string): Promise<string | null> {
   const button = player()?.querySelector<HTMLElement>('.ytp-subtitles-button');
   if (!button) return null;
   const isOn = (): boolean => button.getAttribute('aria-pressed') === 'true';
   const wasOn = isOn();
-  if (wasOn) {
-    // Captions are on but the player has not asked for this video's track yet: off and on again.
-    button.click();
-    await sleep(400);
-  }
+  const stopWatching = watchViewerCaptionChanges(button);
+  // Until Skipjack's clicks have settled, assume nothing changed, which restores nothing.
+  let leftOn = wasOn;
   const showOverlay = wasOn ? null : hideCaptionOverlay();
   try {
+    if (wasOn) {
+      // Captions are on but the player has not asked for this video's track yet: off and on again.
+      button.click();
+      await sleep(400);
+    }
     if (!isOn()) button.click();
+    // Read back where the clicks left the button, rather than assume they took effect.
+    await sleep(150);
+    leftOn = isOn();
     return await waitFor(() => observedCaptionUrl(videoId), 6000, 100);
   } finally {
-    // Compare rather than click blindly: the viewer or the player may have changed it meanwhile.
-    if (isOn() !== wasOn) button.click();
+    const viewerTouched = stopWatching();
+    if (shouldRestoreCaptions({ wasOn, leftOn, nowOn: isOn(), viewerTouched })) button.click();
     if (showOverlay) {
       await sleep(300);
       showOverlay();
@@ -318,8 +358,9 @@ async function capture(req: TranscriptRequest): Promise<TranscriptReply> {
 
   const fetchUrl = new URL(url, location.origin);
   fetchUrl.searchParams.set('fmt', 'json3');
-  ownFetches.add(fetchUrl.href);
-  const response = await fetch(fetchUrl.href, { credentials: 'include' });
+  rememberOwnFetch(fetchUrl.href);
+  // A hung request would otherwise hold up every later capture, which waits its turn behind this one.
+  const response = await fetch(fetchUrl.href, { credentials: 'include', signal: AbortSignal.timeout(CAPTION_FETCH_TIMEOUT_MS) });
   const cues = parseJson3(await response.text());
   if (cues.length === 0) return fail(`the caption request returned no cues (HTTP ${response.status})`, true);
   if (latest !== req.nonce) return fail('superseded by a newer request', false);

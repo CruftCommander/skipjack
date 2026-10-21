@@ -39,6 +39,21 @@ export interface BrowserShell {
    */
   isAlive(): boolean;
   openOptionsPage(): Promise<void>;
+  /**
+   * Makes one cheap extension API call. Chromium stops an idle background service worker 30 seconds
+   * after its last extension event or API call, and each call resets that timer.
+   */
+  keepAlive(): Promise<void>;
+  /**
+   * Hides local storage from content scripts, so only the extension's own pages and background
+   * script can read the API key there. Resolves false where the browser can't do this (Firefox).
+   */
+  restrictLocalStorage(): Promise<boolean>;
+  /**
+   * Calls `listener` when the browser starts with the extension installed, and when the extension
+   * is installed or updated. Registering it also makes the background script start at those times.
+   */
+  onStartup(listener: () => void): void;
 }
 
 // Minimal typing of the WebExtensions namespace. Firefox exposes it as `browser`, Chromium as `chrome`.
@@ -138,6 +153,21 @@ export function createWebExtShell(): BrowserShell {
       } catch {
         return false;
       }
+    },
+    async keepAlive() {
+      await ext.runtime.getPlatformInfo();
+    },
+    async restrictLocalStorage() {
+      // Chromium 102 and later. Local storage is open to content scripts by default; this limits it
+      // to contexts that come from the extension itself.
+      const local = ext.storage.local as { setAccessLevel?: (o: { accessLevel: 'TRUSTED_CONTEXTS' }) => Promise<void> };
+      if (typeof local.setAccessLevel !== 'function') return false;
+      await local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+      return true;
+    },
+    onStartup(listener) {
+      ext.runtime.onStartup.addListener(() => listener());
+      ext.runtime.onInstalled.addListener(() => listener());
     },
   };
 }

@@ -53,6 +53,11 @@ export interface DetectOptions {
   apiKey: string;
   model: string;
   signal?: AbortSignal;
+  /**
+   * Called whenever the provider receives something: the response headers, then each chunk of a
+   * streamed body. The caller uses it to reset an idle timeout.
+   */
+  onActivity?: () => void;
 }
 
 export interface LlmProvider {

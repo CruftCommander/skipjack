@@ -309,3 +309,103 @@ test('scoreVideo accepts any boundary inside a ground-truth range', () => {
   const tooEarly = scoreVideo(truth, [{ category: 'interaction', start: 1843.6, end: 1848 }]).matches[0]!;
   assert.equal(tooEarly.end.pitchShown, 1);
 });
+
+// Follow-up to the 2026-10-21 self-review of 201e6de.
+
+const enc = new TextEncoder();
+const event = (e: Record<string, unknown>): Uint8Array => enc.encode(`event: ${String(e.type)}\ndata: ${JSON.stringify(e)}\n\n`);
+const started = { type: 'message_start', message: { model: 'm', usage: { input_tokens: 5 } } };
+
+test('a connection that drops mid-stream is a SpentError', async () => {
+  const provider = createAnthropicProvider(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(event(started));
+          },
+          pull(c) {
+            c.error(new TypeError('network error'));
+          },
+        }),
+      ),
+  );
+  await assert.rejects(provider.detect(input, { apiKey: 'k', model: 'm' }), (e: unknown) => e instanceof SpentError && /network error/.test(e.message));
+});
+
+/** A response whose body never ends, and errors the way fetch() does when its signal fires. */
+function hangingResponse(signal: AbortSignal | null | undefined, onCancel?: () => void, first: Record<string, unknown>[] = [started]): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const e of first) c.enqueue(event(e));
+        signal?.addEventListener('abort', () => c.error(new DOMException('The operation was aborted.', 'AbortError')));
+      },
+      cancel() {
+        onCancel?.();
+      },
+    }),
+  );
+}
+
+test('a timeout after the request was accepted is a SpentError; one before is not', async () => {
+  const accepted = createAnthropicProvider(async (_u, init) => hangingResponse(init?.signal));
+  const late = new AbortController();
+  setTimeout(() => late.abort(), 20);
+  await assert.rejects(accepted.detect(input, { apiKey: 'k', model: 'm', signal: late.signal }), (e: unknown) => e instanceof SpentError && /timed out/.test(e.message));
+
+  const neverAnswers = createAnthropicProvider(
+    (_u, init) =>
+      new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError'))),
+      ),
+  );
+  const early = new AbortController();
+  setTimeout(() => early.abort(), 20);
+  await assert.rejects(neverAnswers.detect(input, { apiKey: 'k', model: 'm', signal: early.signal }), (e: unknown) => e instanceof Error && !(e instanceof SpentError));
+});
+
+test('an error event mid-stream stops the download', async () => {
+  let cancelled = false;
+  const provider = createAnthropicProvider(async (_u, init) =>
+    hangingResponse(init?.signal, () => (cancelled = true), [started, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }]),
+  );
+  await assert.rejects(provider.detect(input, { apiKey: 'k', model: 'm' }), /Overloaded/);
+  assert.equal(cancelled, true);
+});
+
+test('the provider reports activity on the response and on every chunk', async () => {
+  let activity = 0;
+  const provider = createAnthropicProvider(async () => sse(toolStream({ segments: [] }), 50));
+  await provider.detect(input, { apiKey: 'k', model: 'm', onActivity: () => activity++ });
+  // Headers, then one call per chunk read, including the final empty read.
+  assert.ok(activity > 3, `only ${activity} activity calls`);
+});
+
+test('a tool call cut off by max_tokens names the stop reason', async () => {
+  const provider = createAnthropicProvider(async () =>
+    sse([
+      started,
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't', name: TOOL.name, input: {} } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"segments":[{"category":"spon' } },
+      { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 16000 } },
+    ]),
+  );
+  await assert.rejects(provider.detect(input, { apiKey: 'k', model: 'm' }), (e: unknown) => e instanceof SpentError && /stop_reason max_tokens/.test(e.message));
+});
+
+test('the unforced tool call allows one call only, and input tokens are read from message_delta', async () => {
+  assert.deepEqual(buildRequest(input, 'm', { type: 'auto', disable_parallel_tool_use: true }).tool_choice, { type: 'auto', disable_parallel_tool_use: true });
+  const choices: unknown[] = [];
+  const provider = createAnthropicProvider(async (_u, init) => {
+    const body = JSON.parse(String(init?.body));
+    choices.push(body.tool_choice);
+    if (body.tool_choice.type === 'tool') return new Response(JSON.stringify({ error: { message: 'tool_choice not supported' } }), { status: 400 });
+    const events = toolStream({ segments: [] });
+    events.splice(-1, 0, { type: 'message_delta', delta: {}, usage: { input_tokens: 1250, output_tokens: 90 } });
+    return sse(events);
+  });
+  const r = await provider.detect(input, { apiKey: 'k', model: 'm' });
+  assert.deepEqual(choices[1], { type: 'auto', disable_parallel_tool_use: true });
+  assert.deepEqual(r.usage, { inputTokens: 1250, outputTokens: 90 });
+});

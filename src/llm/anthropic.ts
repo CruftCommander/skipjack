@@ -3,8 +3,11 @@
 // Docs: https://platform.claude.com/docs/en/api/messages
 //
 // The response is streamed. A non-streamed response sends nothing until the model has finished, and
-// Chromium may stop an extension's service worker that waits more than 30 seconds for a response to
-// start; the tokens would be billed and the result lost.
+// Chromium stops an extension's service worker when a fetch() response takes more than 30 seconds to
+// arrive; the tokens would be billed and the result lost. Streaming covers only that wait for the
+// first byte. Chromium can still stop a service worker that has made no extension API call for 30
+// seconds while a long stream is being read, so DetectionService keeps the worker alive while a
+// detection runs.
 
 import { buildUserMessage, SYSTEM_PROMPT, TOOL, TOOL_NAME, transcriptLines } from '../detect/prompt';
 import { parseToolInput, refine, toTimed } from '../detect/postprocess';
@@ -16,10 +19,11 @@ export const ANTHROPIC_VERSION = '2023-06-01';
 const MAX_OUTPUT_TOKENS = 16000;
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
-type ToolChoice = { type: 'tool'; name: string } | { type: 'auto' };
+type ToolChoice = { type: 'tool'; name: string } | { type: 'auto'; disable_parallel_tool_use: true };
 
 const FORCED: ToolChoice = { type: 'tool', name: TOOL_NAME };
-const AUTO: ToolChoice = { type: 'auto' };
+// Unforced, the model could call the tool more than once; only one report is read.
+const AUTO: ToolChoice = { type: 'auto', disable_parallel_tool_use: true };
 
 export function buildRequest(input: DetectionInput, model: string, toolChoice: ToolChoice = FORCED): Record<string, unknown> {
   return {
@@ -52,8 +56,11 @@ interface Streamed {
   toolJson: string | null;
 }
 
-/** Reads a Messages API event stream (server-sent events) into the parts detection needs. */
-export async function readStream(body: ReadableStream<Uint8Array>): Promise<Streamed> {
+/**
+ * Reads a Messages API event stream (server-sent events) into the parts detection needs. Calls
+ * `onChunk` for every chunk received, and releases the stream however reading ends.
+ */
+export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () => void): Promise<Streamed> {
   const out: Streamed = { model: null, inputTokens: 0, outputTokens: 0, stopReason: null, toolJson: null };
   let toolIndex: number | null = null;
   let buffer = '';
@@ -89,8 +96,10 @@ export async function readStream(body: ReadableStream<Uint8Array>): Promise<Stre
         break;
       }
       case 'message_delta': {
-        const usage = e.usage as { output_tokens?: number } | undefined;
+        // Counts here are cumulative, and input_tokens can appear here too.
+        const usage = e.usage as { input_tokens?: number; output_tokens?: number } | undefined;
         const delta = e.delta as { stop_reason?: string } | undefined;
+        if (typeof usage?.input_tokens === 'number') out.inputTokens = usage.input_tokens;
         if (usage?.output_tokens !== undefined) out.outputTokens = usage.output_tokens;
         if (delta?.stop_reason) out.stopReason = delta.stop_reason;
         break;
@@ -103,22 +112,31 @@ export async function readStream(body: ReadableStream<Uint8Array>): Promise<Stre
     }
   };
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    // Events are separated by a blank line; each has "event:" and "data:" lines.
-    let cut: number;
-    while ((cut = buffer.search(/\r?\n\r?\n/)) >= 0) {
-      const chunk = buffer.slice(0, cut);
-      buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, '');
-      const data = chunk
-        .split(/\r?\n/)
-        .filter((l) => l.startsWith('data:'))
-        .map((l) => l.slice(5).trimStart())
-        .join('\n');
-      if (data) handle(data);
+  let finished = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      onChunk?.();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      // Events are separated by a blank line; each has "event:" and "data:" lines.
+      let cut: number;
+      while ((cut = buffer.search(/\r?\n\r?\n/)) >= 0) {
+        const chunk = buffer.slice(0, cut);
+        buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, '');
+        const data = chunk
+          .split(/\r?\n/)
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+          .join('\n');
+        if (data) handle(data);
+      }
+      if (done) break;
     }
-    if (done) break;
+    finished = true;
+  } finally {
+    // On an error event or a failed read, stop the download rather than leave it running.
+    if (finished) reader.releaseLock();
+    else await reader.cancel().catch(() => undefined);
   }
   if (buffer.trim()) {
     const data = buffer.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
@@ -126,6 +144,9 @@ export async function readStream(body: ReadableStream<Uint8Array>): Promise<Stre
   }
   return out;
 }
+
+/** True for the error fetch() and stream reads throw when their AbortSignal fires. */
+const isAbort = (error: unknown): boolean => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 
 export function createAnthropicProvider(fetchFn: FetchFn = (i, init) => fetch(i, init)): LlmProvider {
   // Some models refuse a forced tool call (for example ones that always think first). Remember
@@ -145,6 +166,7 @@ export function createAnthropicProvider(fetchFn: FetchFn = (i, init) => fetch(i,
     };
     if (options.signal) init.signal = options.signal;
     const response = await fetchFn(ANTHROPIC_URL, init);
+    options.onActivity?.();
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
       throw new ApiError(`Anthropic: ${body?.error?.message ?? `HTTP ${response.status}`}`, response.status);
@@ -173,14 +195,24 @@ export function createAnthropicProvider(fetchFn: FetchFn = (i, init) => fetch(i,
         }
       }
 
-      // From here the request was accepted, so tokens are being spent. A response that arrives but
-      // can't be used is a SpentError, which the caller caches so the same video is not paid for
-      // again; an error the API reports mid-stream (overload, for example) and a timeout are not.
+      // From here the request was accepted, so tokens are being spent. Anything that then stops the
+      // result from arriving or being used is a SpentError, which the caller remembers so the same
+      // video is not paid for again: a response that can't be used, a dropped connection, and a
+      // timeout (the caller aborting the signal) while the response streams. The one exception is an
+      // error event the API sends mid-stream, such as overload, which is transient and not held.
+      // Errors before this point (fetch() rejecting, an HTTP error, a timeout before the response
+      // arrived) mean nothing was accepted, so the next visit tries again.
       try {
         if (!response.body) throw new Error('empty response');
-        const streamed = await readStream(response.body);
+        const streamed = await readStream(response.body, options.onActivity);
         if (streamed.toolJson === null) throw new Error(`no ${TOOL_NAME} call in the response (stop_reason ${String(streamed.stopReason)})`);
-        const toolInput = JSON.parse(streamed.toolJson || '{}');
+        let toolInput: unknown;
+        try {
+          toolInput = JSON.parse(streamed.toolJson || '{}');
+        } catch (error) {
+          // A max_tokens cut otherwise shows only as "Unterminated string in JSON".
+          throw new Error(`unreadable ${TOOL_NAME} call (stop_reason ${String(streamed.stopReason)}): ${error instanceof Error ? error.message : String(error)}`);
+        }
         const lines = transcriptLines(input);
         return {
           segments: refine(toTimed(parseToolInput(toolInput), lines), input.durationSeconds, input.signals.chapters),
@@ -188,7 +220,8 @@ export function createAnthropicProvider(fetchFn: FetchFn = (i, init) => fetch(i,
           usage: { inputTokens: streamed.inputTokens, outputTokens: streamed.outputTokens },
         };
       } catch (error) {
-        if (error instanceof ApiError || (error instanceof Error && error.name === 'AbortError')) throw error;
+        if (error instanceof ApiError) throw error;
+        if (isAbort(error) || options.signal?.aborted) throw new SpentError('Anthropic: timed out while the response was streaming');
         throw new SpentError(`Anthropic: ${error instanceof Error ? error.message.replace(/^Anthropic: /, '') : String(error)}`);
       }
     },

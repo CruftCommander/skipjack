@@ -32,7 +32,7 @@ Other behavior you can change on the settings page:
 - **Short segments.** Interaction reminders and self-promotion shorter than 5 seconds are left alone. Sponsor reads are skipped at any length.
 - **Near the end of a video.** Skipping a segment that runs to the end jumps to the end screen, which can start the next video. By default, when a skip would land within 5 seconds of the end, Skipjack lets the segment play. You can choose to skip anyway, or to skip and pause. A sponsor read is never left to play: with the default setting, it is skipped and the video pauses.
 - **Channels.** You can turn skipping off for a channel. Select the Skipjack button in the toolbar while one of its videos is open, and clear **Skip segments on this channel**. You can also add a channel by URL, @handle, or channel ID on the settings page, under **Channels**. Skipjack doesn't look up videos from an excluded channel at all. The list syncs with your browser profile and holds up to 250 channels.
-- **Detection.** Add an Anthropic API key on the settings page, under **Detection**, and Skipjack reads each video's captions and asks Claude where the pitches are. By default it runs on every video and fills in only the categories SponsorBlock has no segments for; SponsorBlock's segments win wherever they exist. Each video is analyzed once and the result is kept on this computer; if analysis fails partway, the video isn't tried again for a day, and Skipjack analyzes at most 60 new videos an hour. On Claude Sonnet 5.5, the default, a 20-minute video costs about 2 cents. To read the captions, Skipjack switches them on for a moment with the captions hidden from view, then switches them back; you can turn that off, and detection then runs only on videos you watch with captions on.
+- **Detection.** Add an Anthropic API key on the settings page, under **Detection**, and Skipjack reads each video's captions and asks Claude where the pitches are. By default it runs on every video and fills in only the categories SponsorBlock has no segments for; SponsorBlock's segments win wherever they exist. Results are kept on this computer for 60 days, for up to 2,000 videos, so a video you watch again isn't paid for again; after that, or once older results are dropped to make room, it is analyzed again. If analysis fails after Anthropic accepted the request, the video isn't tried again with that model for a day, and Skipjack analyzes at most 60 new videos an hour. **Clear detection cache**, under **Detection**, removes every saved result. On Claude Sonnet 5.5, the default, a 20-minute video costs about 2 cents. To read the captions, Skipjack switches them on for a moment with the captions hidden from view, then switches them back; you can turn that off, and detection then runs only on videos you watch with captions on.
 - **Undo shortcut.** Alt+Shift+U undoes the last skip, whether or not the skip message is showing. To change it in Edge, open `edge://extensions/shortcuts`; in Chrome, `chrome://extensions/shortcuts`. In Firefox, open `about:addons`, select the gear button, and then select **Manage Extension Shortcuts**.
 - **Skip message.** After each skip, a message with an **Undo** button appears in the player for 6 seconds. Undo returns to the start of the segment and lets it play.
 
@@ -100,12 +100,14 @@ The rest:
 
 ## Privacy
 
-Skipjack keeps no history and has no server of its own. It sends two kinds of request:
+Skipjack has no server of its own. It sends two kinds of request:
 
 - **A segment lookup to SponsorBlock.** The request carries the first 4 characters of the SHA-256 hash of the video ID, not the ID itself, so SponsorBlock cannot tell which video you are watching.
 - **Detection requests to Anthropic, only if you add an API key.** For each video analyzed, Skipjack sends the video's captions, title, chapter titles, whether it is marked as paid promotion, and any description lines that look promotional, using your key. Anthropic's terms for your account apply to that data.
 
-Your settings and excluded channels are stored in your browser's synced extension storage. Your API key and the detection results stay in local extension storage on this computer, never sync, and are never visible to web pages.
+Your settings and excluded channels are stored in your browser's synced extension storage. Your API key and the detection results stay in local extension storage on this computer and never sync. Web pages can't read local extension storage. In Edge and Chrome, Skipjack also hides it from its own scripts that run on YouTube, so only its settings page and background script can read your key. Firefox has no way to do that, so there Skipjack's script on YouTube pages could read it if the page's renderer were compromised.
+
+Skipjack does keep a record of the videos it analyzes, on this computer only. Each saved detection result is stored under the video's ID for up to 60 days, and the settings page shows the most recent one. To delete them, select **Clear detection cache** on the settings page, under **Detection**. Removing Skipjack deletes them too.
 
 ## Attribution
 

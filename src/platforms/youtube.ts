@@ -1,7 +1,7 @@
 // YouTube adapter. Every YouTube quirk stays in this file and youtube-main.ts.
 
 import { normalizeHandle, type ChannelRef } from '../core/channels';
-import { MAX_CHAPTERS, MAX_CUES, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../core/messages';
+import { MAX_CHAPTERS, MAX_CUES, MAX_DURATION_SECONDS, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../core/messages';
 import { MIN_DETECTION_SECONDS } from '../core/sources';
 import type { ChannelSyntax, PlatformAdapter, TranscriptResult } from './platform';
 
@@ -45,6 +45,33 @@ export type TranscriptReply =
     }
   | { source: typeof TRANSCRIPT_MESSAGE_SOURCE; nonce: string; ok: false; videoId: string; reason: string; retry: boolean };
 
+/**
+ * The media's length in seconds from the player response's `videoDetails`, or 0 for a stream that is
+ * live now. The <video> element's own duration may belong to an ad, so youtube-main.ts uses this.
+ *
+ * Only `isLive` means live. `isLiveContent` stays true on the finished recording of a stream, which
+ * has a real length and captions and is analyzed like any other video. A missing, zero, or
+ * malformed `lengthSeconds` is also treated as live, because there is no end to plan skips against.
+ */
+export function playerMediaLength(details: { lengthSeconds?: unknown; isLive?: unknown } | undefined): number {
+  if (!details || details.isLive === true) return 0;
+  const raw = details.lengthSeconds;
+  const n = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : Number.NaN;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Whether to switch captions back after the brief toggle. Skipjack restores the viewer's setting only
+ * if captions are still where it left them. If the viewer changed them during the switch, by the
+ * captions button, the settings menu, or the C key, the viewer's choice stands.
+ *
+ * `leftOn` is the state right after Skipjack's own clicks, read back from the button rather than
+ * assumed, so a click the player ignored is never "restored" over the viewer's change.
+ */
+export function shouldRestoreCaptions(s: { wasOn: boolean; leftOn: boolean; nowOn: boolean; viewerTouched: boolean }): boolean {
+  return !s.viewerTouched && s.leftOn !== s.wasOn && s.nowOn === s.leftOn;
+}
+
 /** Parses YouTube's json3 caption format into [startSeconds, durationSeconds, text] cues. */
 export function parseJson3(body: string): [number, number, string][] {
   let json: { events?: { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string }[] }[] };
@@ -79,12 +106,16 @@ const TRANSCRIPT_TIMEOUT_MS = 120_000;
  * misbehaving page could make detection spend. 400,000 characters is about 7 hours of speech.
  */
 
-/** Validates and converts the page-world script's reply. Throws on a malformed one. */
-function toResult(r: TranscriptReply, mediaId: string): TranscriptResult {
+/**
+ * Validates and converts the page-world script's reply. Throws on a malformed one. Exported for
+ * tests, which check that what it lets through always passes the background's isDetectRequest.
+ */
+export function toResult(r: TranscriptReply, mediaId: string): TranscriptResult {
   if (!r.ok) return { ok: false, reason: String(r.reason).slice(0, 200), retry: Boolean(r.retry) };
   if (r.videoId !== mediaId || !Array.isArray(r.cues)) throw new Error('mismatched reply');
   const length = Number(r.lengthSeconds);
   if (!Number.isFinite(length) || length < MIN_DETECTION_SECONDS) return { ok: false, reason: 'too short or live', retry: false };
+  if (length > MAX_DURATION_SECONDS) return { ok: false, reason: 'longer than any video Skipjack analyzes', retry: false };
   // Kept within the limits the background script checks (isDetectRequest), so a real transcript is
   // never refused there.
   const transcript: { start: number; duration: number; text: string }[] = [];

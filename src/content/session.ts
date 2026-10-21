@@ -233,7 +233,8 @@ export class Session {
     const status = await this.shell.sendMessage<DetectionStatusResponse>(statusRequest);
     if (!this.detectionAllowed()) return;
     if (!status?.ok) {
-      log.warn(`${this.media.id}: ${status?.error ?? 'no answer from the background script'}; no transcript detection`);
+      // Refused before any captions are touched: the hourly limit, an unknown model, or a failure hold.
+      log.warn(`${this.media.id}: no transcript detection: ${status?.error ?? 'no answer from the background script'}`);
       return;
     }
     if (status.cached) return this.applyDetected(status.cached, true);
@@ -250,7 +251,8 @@ export class Session {
         const request: DetectRequest = { type: 'detect', model: this.settings.detection.model, input: transcript.input };
         log.info(`${this.media.id}: detecting with ${request.model} (${transcript.input.transcript.length} caption lines)`);
         const result = await this.shell.sendMessage<DetectResponse>(request);
-        if (this.destroyed) return;
+        // Detection can take a minute: the user may have switched it off or excluded the channel meanwhile.
+        if (!this.detectionAllowed()) return;
         if (!result?.ok) {
           log.warn(`${this.media.id}: detection failed: ${result?.error ?? 'no response'}`);
           return;

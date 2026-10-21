@@ -5,7 +5,7 @@ import { ChannelStore } from '../browser/channel-store';
 import type { ChannelRef } from '../core/channels';
 import { DEFAULT_SETTINGS, normalizeSettings, SETTINGS_KEY, type Settings } from '../core/settings';
 import { channelUrl, parseChannel } from '../platforms/registry';
-import { DETECTION_STATUS_KEY, type DetectionStatus } from '../background/detection';
+import { DETECTION_CACHE_PREFIX, DETECTION_STATUS_KEY, detectionCacheKeys, type DetectionStatus } from '../core/messages';
 import { apiKeyStorageKey, llmProviders } from '../llm/registry';
 
 const shell = createWebExtShell();
@@ -225,6 +225,8 @@ async function renderKey(): Promise<void> {
   keyStatus.textContent = set ? `A key ending in ${key.slice(-4)} is saved.` : 'No key saved. Detection is off until you add one.';
 }
 
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 keySave.addEventListener('click', async () => {
   if (!keyProvider) return;
   const key = keyInput.value.trim();
@@ -232,15 +234,44 @@ keySave.addEventListener('click', async () => {
     keyStatus.textContent = "That doesn't look like an Anthropic API key. Keys start with sk-ant-.";
     return;
   }
-  await shell.setLocalItems({ [apiKeyStorageKey(keyProvider.id)]: key });
+  try {
+    await shell.setLocalItems({ [apiKeyStorageKey(keyProvider.id)]: key });
+  } catch (error) {
+    // Keep what was typed, so a retry needs no re-paste.
+    keyStatus.textContent = `The key was not saved: ${errorText(error)}`;
+    return;
+  }
   keyInput.value = '';
-  await renderKey();
+  await renderKey().catch(() => undefined);
 });
 
 keyRemove.addEventListener('click', async () => {
   if (!keyProvider) return;
-  await shell.removeLocal([apiKeyStorageKey(keyProvider.id)]);
-  await renderKey();
+  try {
+    await shell.removeLocal([apiKeyStorageKey(keyProvider.id)]);
+  } catch (error) {
+    keyStatus.textContent = `The key was not removed: ${errorText(error)}`;
+    return;
+  }
+  await renderKey().catch(() => undefined);
+});
+
+const cacheClear = document.getElementById('detection-clear') as HTMLButtonElement;
+const cacheStatus = document.getElementById('detection-clear-status') as HTMLParagraphElement;
+
+cacheClear.addEventListener('click', async () => {
+  cacheClear.disabled = true;
+  try {
+    const keys = detectionCacheKeys(await shell.getAllLocal());
+    if (keys.length > 0) await shell.removeLocal(keys);
+    const videos = keys.filter((k) => k.startsWith(DETECTION_CACHE_PREFIX)).length;
+    cacheStatus.textContent =
+      videos === 0 ? 'The detection cache was already empty.' : `Cleared saved results for ${videos.toLocaleString()} video${videos === 1 ? '' : 's'}.`;
+  } catch (error) {
+    cacheStatus.textContent = `The detection cache was not cleared: ${errorText(error)}`;
+  } finally {
+    cacheClear.disabled = false;
+  }
 });
 
 async function renderLastDetection(): Promise<void> {

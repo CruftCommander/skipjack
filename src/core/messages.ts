@@ -63,6 +63,30 @@ export type DetectResponse =
   | { ok: true; segments: Segment[]; cached: boolean; inputTokens: number; outputTokens: number }
   | { ok: false; error: string };
 
+/** Local storage key of the last detection's outcome, written by the background, shown on the settings page. */
+export const DETECTION_STATUS_KEY = 'detectionStatus';
+
+/** Prefix of every cached detection result and failure hold in local storage. */
+export const DETECTION_CACHE_PREFIX = 'det:';
+
+/** Shown on the settings page, so a failing key or a quota problem is visible. */
+export interface DetectionStatus {
+  at: number;
+  ok: boolean;
+  message: string;
+  media?: MediaRef;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+/**
+ * The local storage keys "Clear detection cache" removes: every cached result and failure hold, and
+ * the last detection's status, which names the last video analyzed. Not the API key or the hourly budget.
+ */
+export function detectionCacheKeys(all: Record<string, unknown>): string[] {
+  return Object.keys(all).filter((k) => k.startsWith(DETECTION_CACHE_PREFIX) || k === DETECTION_STATUS_KEY);
+}
+
 /** Background to content (active tab): the undo shortcut was pressed. */
 export interface UndoLastSkipRequest {
   type: 'undoLastSkip';
@@ -87,7 +111,7 @@ export const MAX_CHAPTERS = 100;
 export const MAX_PROMO_LINES = 10;
 const MAX_LINE_CHARS = 2000;
 /** Longer than any real video; a guard against nonsense, not a policy. */
-const MAX_DURATION_SECONDS = 48 * 3600;
+export const MAX_DURATION_SECONDS = 48 * 3600;
 
 function finiteIn(v: unknown, min: number, max: number): v is number {
   return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
