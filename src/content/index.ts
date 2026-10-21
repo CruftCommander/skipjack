@@ -2,6 +2,8 @@
 // opens, and keeps each Session's settings current.
 
 import { createWebExtShell } from '../browser/shell';
+import { ChannelStore } from '../browser/channel-store';
+import { isGetChannelRequest, type GetChannelResponse } from '../core/messages';
 import { normalizeSettings, SETTINGS_KEY } from '../core/settings';
 import { adapterFor } from '../platforms/registry';
 import { Toast } from '../ui/toast';
@@ -26,6 +28,8 @@ async function main(): Promise<void> {
 
   const shell = createWebExtShell();
   let settings = normalizeSettings(await shell.getSynced(SETTINGS_KEY));
+  const channels = new ChannelStore(shell);
+  let excluded = await channels.list();
   const toast = new Toast();
   let session: Session | null = null;
 
@@ -34,6 +38,19 @@ async function main(): Promise<void> {
   shell.onSyncedChanged(SETTINGS_KEY, (value) => {
     settings = normalizeSettings(value);
     session?.updateSettings(settings);
+  });
+  channels.onChanged((list) => {
+    excluded = list;
+    session?.updateExclusions(excluded);
+  });
+
+  // The popup asks which channel the open video belongs to.
+  shell.onMessage((message) => {
+    if (!isGetChannelRequest(message)) return undefined;
+    const reply: GetChannelResponse = session
+      ? { ok: true, media: session.media, channel: session.currentChannel() }
+      : { ok: false };
+    return Promise.resolve(reply);
   });
 
   const stop = adapter.watchMedia((mediaId) => {
@@ -45,7 +62,7 @@ async function main(): Promise<void> {
       toast.destroy();
       return;
     }
-    if (mediaId) session = new Session({ platform: adapter.id, id: mediaId }, adapter, shell, settings, toast);
+    if (mediaId) session = new Session({ platform: adapter.id, id: mediaId }, adapter, shell, channels, settings, excluded, toast);
   });
 }
 

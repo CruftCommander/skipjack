@@ -1,3 +1,4 @@
+import type { BrowserShell } from '../src/browser/shell';
 import { normalizeSettings, type Settings } from '../src/core/settings';
 import type { MediaLike, Timers } from '../src/core/skipper';
 import type { Category, Segment } from '../src/core/types';
@@ -76,3 +77,35 @@ export class FakeTimers implements Timers {
     for (const [, t] of entries) t.callback();
   }
 }
+
+/** An in-memory synced storage behind the BrowserShell interface. */
+export function fakeShell(): BrowserShell & { items: Record<string, unknown> } {
+  const items: Record<string, unknown> = {};
+  const listeners: ((keys: string[]) => void)[] = [];
+  const fire = (keys: string[]): void => listeners.forEach((l) => l(keys));
+  return {
+    items,
+    getSynced: async (k) => items[k],
+    setSynced: async (k, v) => {
+      items[k] = v;
+      fire([k]);
+    },
+    getAllSynced: async () => ({ ...items }),
+    setSyncedItems: async (o) => {
+      Object.assign(items, o);
+      fire(Object.keys(o));
+    },
+    removeSynced: async (keys) => {
+      for (const k of keys) delete items[k];
+      fire(keys);
+    },
+    onSyncedChanged: () => undefined,
+    onSyncedKeysChanged: (l) => void listeners.push(l),
+    sendMessage: async () => undefined as never,
+    onMessage: () => undefined,
+    sendToActiveTab: async () => null,
+    openOptionsPage: async () => undefined,
+    isAlive: () => true,
+  };
+}
+

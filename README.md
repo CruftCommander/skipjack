@@ -31,6 +31,7 @@ Other behavior you can change on the settings page:
 
 - **Short segments.** Interaction reminders and self-promotion shorter than 5 seconds are left alone. Sponsor reads are skipped at any length.
 - **Near the end of a video.** Skipping a segment that runs to the end jumps to the end screen, which can start the next video. By default, when a skip would land within 5 seconds of the end, Skipjack lets the segment play. You can choose to skip anyway, or to skip and pause. A sponsor read is never left to play: with the default setting, it is skipped and the video pauses.
+- **Channels.** You can turn skipping off for a channel. Select the Skipjack button in the toolbar while one of its videos is open, and clear **Skip segments on this channel**. You can also add a channel by URL, @handle, or channel ID on the settings page, under **Channels**. Skipjack doesn't look up videos from an excluded channel at all. The list syncs with your browser profile and holds up to 100 channels.
 - **Skip message.** After each skip, a message with an **Undo** button appears in the player for 6 seconds. Undo returns to the start of the segment and lets it play.
 
 Skipjack never skips while YouTube is playing one of its own ads, and it leaves YouTube Shorts alone.
@@ -53,7 +54,7 @@ You need [Node.js](https://nodejs.org) 20 or later.
 1. Select **Load unpacked**, and then choose the `dist/chromium` folder.
 1. Open a YouTube video that SponsorBlock users have marked.
 
-To open settings, select the Skipjack icon in the toolbar. If the icon is hidden, open it from the extensions menu.
+To open settings, select the Skipjack button in the toolbar, and then select **Settings**. If the button is hidden, open it from the extensions menu.
 
 After you rebuild, select the reload icon on Skipjack's card on the extensions page, and then reload the YouTube tab.
 
@@ -91,7 +92,7 @@ The rest:
 - `src/background` looks up segments for content scripts. Requests to SponsorBlock happen there, under the extension's host permission.
 - `src/content` follows the video the user opens and runs one session per video.
 - `src/detect` holds the detection prompt and the clean-up of model output, shared by every LLM provider.
-- `src/ui` holds the skip toast. `src/options` holds the settings page.
+- `src/ui` holds the skip toast. `src/options` holds the settings page, and `src/popup` the toolbar popup.
 - `eval` scores detection against hand-verified boundaries. It is a development tool and is not part of the extension.
 - `scripts/build.mjs` generates each target's manifest and bundles the scripts.
 

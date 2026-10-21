@@ -23,7 +23,7 @@ function manifest(target) {
     description: 'Skip the pitch. Skips sponsor reads, interaction reminders, and self-promotion in videos.',
     permissions: ['storage'],
     host_permissions: ['https://sponsor.ajay.app/*'],
-    action: { default_title: 'Skipjack settings' },
+    action: { default_title: 'Skipjack', default_popup: 'popup.html' },
     options_ui: { page: 'options.html', open_in_tab: true },
     content_scripts: [
       // Isolated world: the extension's own logic.
@@ -64,6 +64,7 @@ async function buildTarget(target) {
       content: 'src/content/index.ts',
       'youtube-main': 'src/platforms/youtube-main.ts',
       options: 'src/options/options.ts',
+      popup: 'src/popup/popup.ts',
     },
     outdir: out,
     bundle: true,
@@ -76,8 +77,8 @@ async function buildTarget(target) {
   };
 
   await writeFile(join(out, 'manifest.json'), JSON.stringify(manifest(target), null, 2) + '\n');
-  for (const file of ['options.html', 'options.css']) {
-    await copyFile(join(root, 'src/options', file), join(out, file));
+  for (const [dir, file] of [['options', 'options.html'], ['options', 'options.css'], ['popup', 'popup.html'], ['popup', 'popup.css']]) {
+    await copyFile(join(root, 'src', dir, file), join(out, file));
   }
 
   if (watch) {

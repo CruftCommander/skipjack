@@ -1,4 +1,4 @@
-// Background script: answers segment lookups for content scripts, and opens settings from the toolbar.
+// Background script: answers segment lookups for content scripts.
 // Network requests to segment sources happen here, under the extension's host permissions, rather
 // than in the content script, where the page's CORS rules would apply.
 
@@ -13,8 +13,4 @@ const service = new SegmentService([createSponsorBlockSource()]);
 shell.onMessage((message) => {
   if (!isRequest(message)) return undefined;
   return service.get(message.media);
-});
-
-shell.onActionClicked(() => {
-  void shell.openOptionsPage();
 });

@@ -1,9 +1,13 @@
 // Settings page. Every control's `name` is a dotted path into Settings; changes save immediately.
 
 import { createWebExtShell } from '../browser/shell';
+import { ChannelStore } from '../browser/channel-store';
+import type { ChannelRef } from '../core/channels';
 import { DEFAULT_SETTINGS, normalizeSettings, SETTINGS_KEY, type Settings } from '../core/settings';
+import { channelUrl, parseChannel } from '../platforms/registry';
 
 const shell = createWebExtShell();
+const channels = new ChannelStore(shell);
 const form = document.getElementById('settings') as HTMLFormElement;
 const status = document.getElementById('status') as HTMLParagraphElement;
 const reset = document.getElementById('reset') as HTMLButtonElement;
@@ -25,6 +29,7 @@ function setPath(obj: Record<string, unknown>, path: string, value: unknown): vo
 }
 
 function controls(): HTMLInputElement[] {
+  // Only named inputs are settings; the channel list has its own storage key.
   return Array.from(form.querySelectorAll<HTMLInputElement>('input[name]'));
 }
 
@@ -87,6 +92,8 @@ function scheduleSave(): void {
 
 form.addEventListener('change', (event) => {
   const target = event.target as HTMLInputElement;
+  // Unnamed inputs, like the channel box, are not settings.
+  if (!target.name) return;
   // A number out of range is clamped when read; show the value that will be saved.
   if (target.type === 'number') render(read());
   else syncDisabled(read());
@@ -100,3 +107,81 @@ reset.addEventListener('click', () => {
 });
 
 void shell.getSynced(SETTINGS_KEY).then((raw) => render(normalizeSettings(raw)));
+
+// Channels the user excluded. Stored under their own key, apart from the settings.
+
+const channelList = document.getElementById('channels') as HTMLUListElement;
+const channelEmpty = document.getElementById('channels-empty') as HTMLParagraphElement;
+const channelInput = document.getElementById('channel-input') as HTMLInputElement;
+const channelAdd = document.getElementById('channel-add') as HTMLButtonElement;
+const channelStatus = document.getElementById('channel-status') as HTMLParagraphElement;
+
+function renderChannels(list: ChannelRef[]): void {
+  channelList.replaceChildren(
+    ...list.map((ch) => {
+      const li = document.createElement('li');
+      const who = document.createElement('span');
+      who.className = 'who';
+      const url = channelUrl(ch);
+      const label = ch.name ?? ch.handle ?? ch.id ?? '';
+      if (url) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = label;
+        who.append(a);
+      } else {
+        who.textContent = label;
+      }
+      const detail = ch.name ? (ch.handle ?? ch.id) : ch.handle && ch.id ? ch.id : undefined;
+      if (detail) {
+        const small = document.createElement('small');
+        small.textContent = detail;
+        who.append(small);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Skip segments on ${label} again`);
+      remove.addEventListener('click', () => void changeChannels(() => channels.remove(ch), `Skipping on ${label} again.`));
+      li.append(who, remove);
+      return li;
+    }),
+  );
+  channelEmpty.hidden = list.length > 0;
+}
+
+async function changeChannels(change: () => Promise<void>, done: string): Promise<boolean> {
+  try {
+    await change();
+    renderChannels(await channels.list());
+    channelStatus.textContent = done;
+    return true;
+  } catch (error) {
+    channelStatus.textContent = error instanceof Error ? error.message : String(error);
+    return false;
+  }
+}
+
+function addChannel(): void {
+  const ch = parseChannel(channelInput.value);
+  if (!ch) {
+    channelStatus.textContent = "That isn't a channel URL, @handle, or channel ID.";
+    return;
+  }
+  // Keep what was typed until the save succeeds.
+  void changeChannels(() => channels.add(ch), `Not skipping on ${ch.handle ?? ch.id} any more.`).then((ok) => {
+    if (ok) channelInput.value = '';
+  });
+}
+
+channelAdd.addEventListener('click', addChannel);
+channelInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addChannel();
+  }
+});
+channels.onChanged(renderChannels);
+void channels.list().then(renderChannels);

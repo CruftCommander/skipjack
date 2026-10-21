@@ -1,6 +1,8 @@
 // Plug-in point 1 of 4: platform adapters.
 // Everything specific to one media site lives behind this interface. Adding a site means adding one adapter.
 
+import type { ChannelRef } from '../core/channels';
+
 export interface PlatformCapabilities {
   /** A community segment database (SponsorBlock) covers this platform. */
   communitySegments: boolean;
@@ -36,4 +38,22 @@ export interface PlatformAdapter {
 
   /** Where to mount overlays such as the toast, so they show in fullscreen. */
   overlayHost(): HTMLElement;
+
+  /**
+   * The channel that published `mediaId`, or null while it is not known yet (the player has not
+   * loaded the media, or the page still shows the previous media after in-site navigation).
+   */
+  channelOf(mediaId: string): ChannelRef | null;
+}
+
+/**
+ * Channel parsing and links, kept apart from PlatformAdapter because the settings page and popup
+ * use them without a page to adapt.
+ */
+export interface ChannelSyntax {
+  readonly platform: string;
+  /** Reads a channel from what a user pastes: a channel URL, a handle, or an ID. */
+  parseChannel(input: string): ChannelRef | null;
+  /** A link to the channel's page. */
+  channelUrl(channel: ChannelRef): string | null;
 }

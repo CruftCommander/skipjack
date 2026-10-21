@@ -66,6 +66,18 @@
         </fieldset>
       </section>
 
+      <section id="channels-section">
+        <h2>Channels</h2>
+        <p class="hint">Skipjack skips nothing on these channels and doesn't look their videos up. You can also switch a channel from the Skipjack toolbar button while its video is open.</p>
+        <ul id="channels" class="channels"></ul>
+        <p id="channels-empty" class="hint">No excluded channels.</p>
+        <div class="row add">
+          <input type="text" id="channel-input" placeholder="Channel URL, @handle, or channel ID" aria-label="Channel to exclude" autocomplete="off" spellcheck="false">
+          <button type="button" id="channel-add">Exclude</button>
+        </div>
+        <p id="channel-status" class="hint" role="status" aria-live="polite"></p>
+      </section>
+
       <section>
         <h2>Feedback</h2>
         <label class="row">

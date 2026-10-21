@@ -7,8 +7,14 @@
 export interface BrowserShell {
   getSynced(key: string): Promise<unknown>;
   setSynced(key: string, value: unknown): Promise<void>;
+  /** Every item in synced storage. */
+  getAllSynced(): Promise<Record<string, unknown>>;
+  setSyncedItems(items: Record<string, unknown>): Promise<void>;
+  removeSynced(keys: string[]): Promise<void>;
   /** Calls `listener` with the new value whenever `key` changes in synced storage. */
   onSyncedChanged(key: string, listener: (value: unknown) => void): void;
+  /** Calls `listener` with the changed keys whenever anything in synced storage changes. */
+  onSyncedKeysChanged(listener: (keys: string[]) => void): void;
   /** Sends a message to the background script and resolves with its reply. */
   sendMessage<T>(message: unknown): Promise<T>;
   /**
@@ -16,7 +22,8 @@ export interface BrowserShell {
    * Messages from other extensions are dropped before `handler` runs.
    */
   onMessage(handler: (message: unknown) => Promise<unknown> | undefined): void;
-  onActionClicked(listener: () => void): void;
+  /** Sends a message to the content script in the active tab. Resolves null when none answers. */
+  sendToActiveTab<T>(message: unknown): Promise<T | null>;
   /**
    * False once the extension is disabled, reloaded, or updated. Chromium leaves content scripts
    * running in open tabs when that happens, with their extension APIs cut off.
@@ -47,6 +54,20 @@ export function createWebExtShell(): BrowserShell {
     async setSynced(key, value) {
       await ext.storage.sync.set({ [key]: value });
     },
+    async getAllSynced() {
+      return (await ext.storage.sync.get(null)) as Record<string, unknown>;
+    },
+    async setSyncedItems(items) {
+      await ext.storage.sync.set(items);
+    },
+    async removeSynced(keys) {
+      await ext.storage.sync.remove(keys);
+    },
+    onSyncedKeysChanged(listener) {
+      ext.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync') listener(Object.keys(changes));
+      });
+    },
     onSyncedChanged(key, listener) {
       ext.storage.onChanged.addListener((changes, area) => {
         const change = changes[key];
@@ -69,11 +90,18 @@ export function createWebExtShell(): BrowserShell {
         return true;
       });
     },
-    onActionClicked(listener) {
-      ext.action.onClicked.addListener(() => listener());
-    },
     openOptionsPage() {
       return ext.runtime.openOptionsPage();
+    },
+    async sendToActiveTab<T>(message: unknown) {
+      try {
+        const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id === undefined) return null;
+        return ((await ext.tabs.sendMessage(tab.id, message)) as T | undefined) ?? null;
+      } catch {
+        // No content script in the tab: not a supported page, or it loaded before Skipjack did.
+        return null;
+      }
     },
     isAlive() {
       try {

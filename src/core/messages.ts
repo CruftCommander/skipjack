@@ -1,5 +1,6 @@
-// Typed messages between the content script and the background script.
+// Typed messages between the content script, the background script, and the popup.
 
+import type { ChannelRef } from './channels';
 import type { MediaRef, Segment } from './types';
 
 export interface GetSegmentsRequest {
@@ -26,4 +27,17 @@ export function isRequest(value: unknown): value is Request {
     media.platform.length > 0 &&
     media.id.length > 0
   );
+}
+
+/** Sent by the popup to the content script in the active tab. */
+export interface GetChannelRequest {
+  type: 'getChannel';
+}
+
+export type GetChannelResponse =
+  | { ok: true; media: MediaRef; channel: ChannelRef | null }
+  | { ok: false };
+
+export function isGetChannelRequest(value: unknown): value is GetChannelRequest {
+  return value !== null && typeof value === 'object' && (value as { type?: unknown }).type === 'getChannel';
 }

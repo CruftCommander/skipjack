@@ -74,3 +74,15 @@ footer p { margin: 4px 0; }
 a { color: var(--accent); }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.channels { list-style: none; margin: 4px 0 8px; padding: 0; }
+.channels li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.channels li:last-child { border-bottom: 0; }
+.channels .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channels .who small { margin-left: 6px; }
+.channels button, .add button { margin-top: 0; }
+.add { cursor: default; flex-wrap: nowrap; }
+input[type="text"] {
+  flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit;
+}

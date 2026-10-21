@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Skipjack</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <strong>Skipjack</strong>
+      <span class="tagline">Skip the pitch.</span>
+    </header>
+
+    <section id="channel" hidden>
+      <p class="label">This channel</p>
+      <p id="channel-name" class="name"></p>
+      <label class="row">
+        <input type="checkbox" id="channel-skip">
+        <span>Skip segments on this channel</span>
+      </label>
+      <p id="channel-note" class="note" role="status" aria-live="polite"></p>
+    </section>
+
+    <p id="no-video" class="note" hidden>Open a video to choose whether Skipjack skips on its channel.</p>
+    <p id="off" class="note" hidden>Skipjack is turned off in settings.</p>
+
+    <button type="button" id="settings">Settings</button>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
