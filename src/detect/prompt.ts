@@ -30,7 +30,8 @@ Not a segment: the video's actual topic, even when the topic is a product; a cre
 How to report a segment:
 - The transcript is numbered. Each line reads "L<number> [<seconds>] <text>".
 - first_line is the line where the pitch begins, including its transition ("But first...", "right after a word from our sponsor", "Producing videos like this takes a lot of time..."). first_words are the first words of the pitch, copied exactly from that line. If the pitch begins mid-line, copy the words where it begins, not the start of the line.
-- last_line is the line where the pitch ends, including the hand-back ("Now, back to the video.", "Let's get back to it."). last_words are the last words of the pitch, copied exactly from that line.
+- last_line is the line where the pitch ends, including the hand-back ("Now, back to the video.", "Let's get back to it."). last_words are the last words of the pitch, copied exactly from that line. Stop at the pitch's final word: never copy words of the content that follows it, even when they share the line.
+- first_words likewise start at the pitch's first word: never copy words of the content before it.
 - When unsure, choose the wider option. Skipping a moment of content is better than showing a moment of the pitch.
 
 Auto-caption quirks:

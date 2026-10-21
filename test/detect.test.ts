@@ -94,6 +94,33 @@ test('toTimed places a mid-line start by word position, and falls back outward w
   assert.deepEqual(toTimed([{ category: 'sponsor', firstLine: 0, lastLine: 99, confidence: 1 }], lines), []);
 });
 
+// yGsVo0uIJVs, second eval: the model quoted the right last words but named the line after them.
+test('toTimed finds a quote in a neighboring line when the stated line does not have it', () => {
+  const lines = [
+    { start: 580, next: 581.6, text: 'subscription the link is in the' },
+    { start: 581.6, next: 583.6, text: 'description by checking out brilliant' },
+    { start: 583.6, next: 589, text: 'you directly support our' },
+    { start: 589, next: 593.2, text: '[Music]' },
+    { start: 593.2, next: 597.2, text: "channel it's the summer of 1974 6 years" },
+  ];
+  const [seg] = toTimed([{ category: 'sponsor', firstLine: 0, lastLine: 4, lastWords: 'you directly support our', confidence: 1 }], lines);
+  assert.equal(seg?.end, 589);
+});
+
+test('refine keeps a segment nested inside one of another category, and the eval does not count it as extra', () => {
+  // wIe3eDfGKUo, second eval: a reminder inside the sponsor read.
+  const out = refine(
+    [
+      { category: 'sponsor', start: 225.4, end: 313.7, confidence: 1 },
+      { category: 'interaction', start: 301.5, end: 306.9, confidence: 0.7 },
+    ],
+    815,
+  );
+  assert.deepEqual(out.map((s) => s.category), ['sponsor', 'interaction']);
+  const sc = scoreVideo([{ category: 'sponsor', start: 226, end: 314 }], out);
+  assert.equal(sc.falsePositives.length, 0);
+});
+
 test('refine fits sponsor detections to a chapter the creator titled Sponsor', () => {
   // 4kYyd_hoqUw: the model split the read and pulled in a content line before it.
   const chapters = [{ title: 'Things In The Woods', start: 240 }, { title: 'Sponsor', start: 420 }, { title: 'Phenomena', start: 520 }];

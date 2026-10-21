@@ -92,21 +92,41 @@ export function quotePosition(lineText: string, quote: string | undefined, side:
   return null;
 }
 
+/** How many lines either side of the stated line to search when a quote is not in it. */
+export const QUOTE_SEARCH_LINES = 2;
+
+/**
+ * Finds a quote in the stated line or, failing that, the nearest line within QUOTE_SEARCH_LINES.
+ * Models sometimes quote the right words but name a neighboring line.
+ */
+function locate(lines: Line[], index: number, quote: string | undefined, side: 'start' | 'end'): { line: Line; frac: number } | null {
+  for (let d = 0; d <= QUOTE_SEARCH_LINES; d++) {
+    for (const i of d === 0 ? [index] : [index - d, index + d]) {
+      const line = lines[i];
+      if (!line) continue;
+      const frac = quotePosition(line.text, quote, side);
+      if (frac !== null) return { line, frac };
+    }
+  }
+  return null;
+}
+
 /** Converts line-based reports to times. Reports pointing outside the transcript are dropped. */
 export function toTimed(reports: ReportedSegment[], lines: Line[]): DetectedSegment[] {
   const out: DetectedSegment[] = [];
   for (const r of reports) {
-    const first = lines[Math.min(r.firstLine, r.lastLine)];
-    const last = lines[Math.max(r.firstLine, r.lastLine)];
+    const firstIndex = Math.min(r.firstLine, r.lastLine);
+    const lastIndex = Math.max(r.firstLine, r.lastLine);
+    const first = lines[firstIndex];
+    const last = lines[lastIndex];
     if (!first || !last) continue;
-    const startFrac = quotePosition(first.text, r.firstWords, 'start') ?? 0;
-    const endFrac = quotePosition(last.text, r.lastWords, 'end') ?? 1;
-    const seg: DetectedSegment = {
-      category: r.category,
-      start: first.start + startFrac * (first.next - first.start),
-      end: last.start + endFrac * (last.next - last.start),
-      confidence: r.confidence,
-    };
+    // Without a match, fall back to the edge of the stated line that skips more.
+    const a = locate(lines, firstIndex, r.firstWords, 'start') ?? { line: first, frac: 0 };
+    const b = locate(lines, lastIndex, r.lastWords, 'end') ?? { line: last, frac: 1 };
+    const start = a.line.start + a.frac * (a.line.next - a.line.start);
+    const end = b.line.start + b.frac * (b.line.next - b.line.start);
+    if (end <= start) continue;
+    const seg: DetectedSegment = { category: r.category, start, end, confidence: r.confidence };
     if (r.firstWords) seg.firstWords = r.firstWords;
     if (r.lastWords) seg.lastWords = r.lastWords;
     out.push(seg);
@@ -159,6 +179,8 @@ export function refine(segments: DetectedSegment[], durationSeconds: number, cha
     }
   }
 
+  // A segment nested inside one of another category is kept: results are cached and filtered by
+  // the user's category settings later, and the nested one still matters if the outer category is off.
   const out: DetectedSegment[] = [];
   for (const seg of merged) {
     let { start, end } = seg;

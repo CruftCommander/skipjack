@@ -42,7 +42,8 @@ const truthFor = (id: string): TruthSegment[] | undefined => {
 };
 
 const reports: { file: string; input: DetectionInput }[] = [];
-for (const file of readdirSync(reportsDir).filter((f) => f.endsWith('-transcript.json'))) {
+// Browsers name repeat downloads "...-transcript (1).json", so match those too.
+for (const file of readdirSync(reportsDir).filter((f) => /-transcript( \(\d+\))?\.json$/.test(f))) {
   let input: DetectionInput;
   try {
     input = reportToInput(JSON.parse(readFileSync(join(reportsDir, file), 'utf8')));
@@ -51,7 +52,11 @@ for (const file of readdirSync(reportsDir).filter((f) => f.endsWith('-transcript
     console.warn(`Skipping ${file}: ${error instanceof Error ? error.message : String(error)}`);
     continue;
   }
-  if (truthFor(input.media.id) && (!only || input.media.id === only)) reports.push({ file, input });
+  if (!truthFor(input.media.id) || (only && input.media.id !== only)) continue;
+  // A video saved more than once ("... (1).json"): keep the report with the most transcript.
+  const existing = reports.findIndex((r) => r.input.media.id === input.media.id);
+  if (existing < 0) reports.push({ file, input });
+  else if (input.transcript.length > (reports[existing]?.input.transcript.length ?? 0)) reports[existing] = { file, input };
 }
 
 if (reports.length === 0) {

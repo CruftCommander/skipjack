@@ -85,7 +85,12 @@ export function scoreVideo(truth: TruthSegment[], detected: Detected[]): VideoSc
     });
   }
 
-  const falsePositives = detected.filter((_, i) => !used.has(i));
+  // A detection nested inside a matched one of another category skips nothing extra, so it is not
+  // counted as a false positive.
+  const matchedSpans = [...used].map((i) => detected[i]!);
+  const falsePositives = detected.filter(
+    (d, i) => !used.has(i) && !matchedSpans.some((m) => m.start <= d.start && m.end >= d.end),
+  );
   const wrongCategory: VideoScore['wrongCategory'] = [];
   for (const t of missed) {
     const d = falsePositives.find((x) => overlap(t, x) >= 0.3 * (t.end - t.start));
