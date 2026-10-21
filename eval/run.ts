@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 
 import { join } from 'node:path';
 import { formatTime } from '../src/core/format';
 import { createAnthropicProvider } from '../src/llm/anthropic';
-import type { DetectedSegment } from '../src/llm/provider';
+import type { DetectedSegment, DetectionInput } from '../src/llm/provider';
 import { reportToInput } from './report';
 import { scoreVideo, type TruthSegment, type VideoScore } from './score';
 
@@ -41,10 +41,18 @@ const truthFor = (id: string): TruthSegment[] | undefined => {
   return Array.isArray(t) ? t : t?.segments;
 };
 
-const reports = readdirSync(reportsDir)
-  .filter((f) => f.endsWith('-transcript.json'))
-  .map((f) => ({ file: f, input: reportToInput(JSON.parse(readFileSync(join(reportsDir, f), 'utf8'))) }))
-  .filter((r) => truthFor(r.input.media.id) && (!only || r.input.media.id === only));
+const reports: { file: string; input: DetectionInput }[] = [];
+for (const file of readdirSync(reportsDir).filter((f) => f.endsWith('-transcript.json'))) {
+  let input: DetectionInput;
+  try {
+    input = reportToInput(JSON.parse(readFileSync(join(reportsDir, file), 'utf8')));
+  } catch (error) {
+    // For example, the probe could not capture a transcript for this video.
+    console.warn(`Skipping ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    continue;
+  }
+  if (truthFor(input.media.id) && (!only || input.media.id === only)) reports.push({ file, input });
+}
 
 if (reports.length === 0) {
   console.error('No transcript report has an entry in ground-truth.json.');

@@ -22,23 +22,25 @@ Both files stay out of Git, because `probe/reports` is ignored: each report name
 
 ## Run it
 
-Copy your Anthropic API key to the clipboard, and then run this in PowerShell 5.1 or 7. It reads the key from the clipboard, checks it before running, and clears the key and the clipboard afterward:
+Run this block in PowerShell 5.1 or 7. When it asks, copy your Anthropic API key to the clipboard and press Enter. It reads the key from the clipboard, checks it before spending anything, and clears the key and the clipboard afterward:
 
 ```powershell
-Set-Location D:\GitHub\SkipJack
-$key = "$(Get-Clipboard)".Trim()
-if ($key -notlike 'sk-ant-*') {
-    Write-Warning "The clipboard doesn't hold an Anthropic key (expected sk-ant-..., got $($key.Length) characters)."
-} else {
-    $env:ANTHROPIC_API_KEY = $key
-    npm run eval
+& {
+    Set-Location D:\GitHub\SkipJack
+    Read-Host 'Copy your Anthropic API key to the clipboard, then press Enter' | Out-Null
+    $key = "$(Get-Clipboard)".Trim()
+    if ($key -notlike 'sk-ant-*') {
+        Write-Warning "The clipboard doesn't hold an Anthropic key (expected sk-ant-..., got $($key.Length) characters)."
+    } else {
+        $env:ANTHROPIC_API_KEY = $key
+        npm run eval
+    }
+    Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+    Set-Clipboard -Value ' '
 }
-Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
-Remove-Variable key -ErrorAction SilentlyContinue
-Set-Clipboard -Value ' '
 ```
 
-Avoid `Read-Host -AsSecureString` for this: in some consoles, Ctrl+V pastes nothing into a hidden prompt, and the eval then gets an empty key.
+The block asks for the key after it starts because copying the block to paste it replaces whatever was on the clipboard. Wrapping it in `& { }` makes PowerShell read the whole block before running it, so the prompt waits for you instead of reading the next pasted line. Avoid `Read-Host -AsSecureString` for the key itself: in some consoles, Ctrl+V pastes nothing into a hidden prompt.
 
 By default the eval runs `claude-haiku-5-5` and `claude-sonnet-5-5` over every report that has ground truth. To narrow it:
 
