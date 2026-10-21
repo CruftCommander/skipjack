@@ -45,6 +45,8 @@ h2 { margin: 0 0 8px; font-size: 16px; }
 
 .row { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; flex-wrap: wrap; }
 .row > span { display: flex; flex-direction: column; }
+/* The text beside a checkbox or radio shrinks to fit beside it, rather than wrapping below it. */
+.row > input[type="checkbox"] + span, .row > input[type="radio"] + span { flex: 1 1 0; min-width: 0; }
 .row.indent { padding-left: 28px; }
 .row.indent > span { display: inline; }
 small { color: var(--muted); font-size: 13px; }
@@ -82,7 +84,7 @@ a { color: var(--accent); }
 .channels .who small { margin-left: 6px; }
 .channels button, .add button { margin-top: 0; }
 .add { cursor: default; flex-wrap: nowrap; }
-input[type="text"] {
+input[type="text"], input[type="password"] {
   flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--text); font: inherit;
 }
