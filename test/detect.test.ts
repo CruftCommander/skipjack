@@ -39,6 +39,15 @@ test('the request forces the tool and the prompt names it', () => {
   assert.equal(r.model, 'claude-haiku-5-5');
 });
 
+test('the prompt leaves a request for comments on its own alone, decided by Jeff on 2026-10-21', () => {
+  // A comment request is part of an interaction reminder only beside a like, subscribe, share, or
+  // notifications request; "let me know your thoughts in the comments" alone is not skipped.
+  const interaction = SYSTEM_PROMPT.split('\n').find((l) => l.startsWith('- interaction:')) ?? '';
+  assert.doesNotMatch(interaction, /^- interaction: requests to [^.]*\bcomment\b/);
+  assert.match(interaction, /request to comment belongs to the segment only when it comes in the same breath/);
+  assert.match(SYSTEM_PROMPT, /Not a segment:[^\n]*a request for comments on its own[^\n]*"let me know your thoughts in the comments"/);
+});
+
 test('parseToolInput keeps valid line-based reports and clamps confidence', () => {
   const out = parseToolInput({
     segments: [

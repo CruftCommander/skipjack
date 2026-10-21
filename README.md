@@ -22,7 +22,7 @@ You choose the categories on the settings page. All three are on by default.
 | Category | Examples |
 | --- | --- |
 | Sponsor | "This video is sponsored by…" |
-| Interaction reminder | Requests to like, subscribe, comment, or turn on notifications |
+| Interaction reminder | Requests to like, subscribe, or turn on notifications. A request for comments on its own, such as "let me know your thoughts in the comments", is left to play. |
 | Self-promotion | Merch, memberships, Patreon, and the creator's other channels |
 
 Skipjack is built to skip a little extra rather than show any part of a pitch. By default it starts each skip half a second early and resumes half a second late. You can change both on the settings page, under **Advanced**.

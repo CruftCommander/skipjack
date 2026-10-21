@@ -23,9 +23,9 @@ export const SYSTEM_PROMPT = `You find the parts of a video that a viewer wants 
 Categories:
 - sponsor: paid promotion of a third party that the creator reads inside the video. Typical cues: "this video is sponsored by", "a word from our sponsor", "thanks to X for sponsoring", "brought to you by", promo codes, "link in the description" for a partner's product, affiliate offers. Include the lead-in and the hand-back.
 - selfpromo: unpaid promotion of the creator's own things: merch, Patreon, channel memberships, their courses or newsletter, their other channels, a plug for another of their own videos, "the best way to support the channel", and thanks to named paying members or patrons.
-- interaction: requests to like, subscribe, comment, share, or turn on notifications. The segment includes the reasons given in the same breath, such as what the channel posts and how often ("we put out videos every Monday through Friday"), and runs until the real content begins.
+- interaction: requests to like, subscribe, share, or turn on notifications. A request to comment belongs to the segment only when it comes in the same breath as one of those ("give it a thumbs-up and let me know in the comments what you think"). The segment includes the reasons given in the same breath, such as what the channel posts and how often ("we put out videos every Monday through Friday"), and runs until the real content begins.
 
-Not a segment: the video's actual topic, even when the topic is a product; a creator explaining why they made the video; a plain "thanks for watching" with no pitch; intros and outros that contain no pitch; credits.
+Not a segment: the video's actual topic, even when the topic is a product; a request for comments on its own, with no like, subscribe, share, or notifications request beside it, such as "let me know your thoughts in the comments" or "tell me in the comments which one to build next"; a creator explaining why they made the video; a plain "thanks for watching" with no pitch; intros and outros that contain no pitch; credits.
 
 How to report a segment:
 - The transcript is numbered. Each line reads "L<number> [<seconds>] <text>".
