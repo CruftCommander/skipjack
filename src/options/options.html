@@ -66,6 +66,38 @@
         </fieldset>
       </section>
 
+      <section id="detection-section">
+        <h2>Detection</h2>
+        <p class="hint">For videos SponsorBlock users haven't fully marked, Skipjack can read the video's captions and ask an AI model where the pitches are. It uses your own Anthropic API key. Each video is analyzed once; a 20-minute video costs about 2 cents on Claude Sonnet.</p>
+
+        <div class="row add key">
+          <input type="password" id="api-key" placeholder="Anthropic API key (sk-ant-...)" aria-label="Anthropic API key" autocomplete="off" spellcheck="false">
+          <button type="button" id="api-key-save">Save key</button>
+          <button type="button" id="api-key-remove" hidden>Remove</button>
+        </div>
+        <p id="api-key-status" class="hint" role="status" aria-live="polite"></p>
+        <p class="hint">The key is stored only in this browser on this computer, and is sent only to Anthropic.</p>
+
+        <fieldset>
+          <legend class="sr-only">When to run detection</legend>
+          <label class="row"><input type="radio" name="detection.mode" value="fillGaps"><span>Fill in what SponsorBlock is missing<small>Runs on every video, for the categories SponsorBlock has no segments for.</small></span></label>
+          <label class="row"><input type="radio" name="detection.mode" value="noCommunity"><span>Only when SponsorBlock has nothing<small>Cheaper. Reminders and self-promotion often go unmarked on SponsorBlock.</small></span></label>
+          <label class="row"><input type="radio" name="detection.mode" value="off"><span>Off<small>Use SponsorBlock only.</small></span></label>
+        </fieldset>
+
+        <label class="row indent">
+          <span>Model</span>
+          <select name="detection.model" id="model"></select>
+        </label>
+
+        <label class="row">
+          <input type="checkbox" name="detection.captionsToggle">
+          <span>Turn captions on briefly to read them<small>Hidden from view, and switched back right away. Off: detection only runs on videos you watch with captions on.</small></span>
+        </label>
+
+        <p id="detection-last" class="hint"></p>
+      </section>
+
       <section id="channels-section">
         <h2>Channels</h2>
         <p class="hint">Skipjack skips nothing on these channels and doesn't look their videos up. You can also switch a channel from the Skipjack toolbar button while its video is open.</p>
@@ -100,6 +132,7 @@
             <input type="number" name="margin.afterSeconds" min="0" max="5" step="0.1" inputmode="decimal">
             <span>seconds late</span>
           </label>
+          <p class="hint">Undo the last skip with Alt+Shift+U. To change the shortcut in Edge, open <code>edge://extensions/shortcuts</code>; in Chrome, <code>chrome://extensions/shortcuts</code>. In Firefox, open <code>about:addons</code>, select the gear button, and then select <strong>Manage Extension Shortcuts</strong>.</p>
           <button type="button" id="reset">Restore defaults</button>
         </details>
       </section>

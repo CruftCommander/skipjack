@@ -2,6 +2,12 @@
 // Everything specific to one media site lives behind this interface. Adding a site means adding one adapter.
 
 import type { ChannelRef } from '../core/channels';
+import type { DetectionInput } from '../llm/provider';
+
+export type TranscriptResult =
+  | { ok: true; input: DetectionInput }
+  /** `retry` is true when trying again later, for example once the video plays, might work. */
+  | { ok: false; reason: string; retry: boolean };
 
 export interface PlatformCapabilities {
   /** A community segment database (SponsorBlock) covers this platform. */
@@ -44,6 +50,22 @@ export interface PlatformAdapter {
    * loaded the media, or the page still shows the previous media after in-site navigation).
    */
   channelOf(mediaId: string): ChannelRef | null;
+
+  /**
+   * Reads the media's transcript and the signals detection uses. `allowToggle` permits switching
+   * captions on for a moment, hidden, to make the platform load them. Absent on platforms without
+   * transcripts.
+   */
+  readTranscript?(mediaId: string, options: { allowToggle: boolean }): Promise<TranscriptResult>;
+
+  /** Stops any transcript read in progress, for example when the viewer moves to other media. */
+  cancelTranscript?(): void;
+
+  /**
+   * The media's length in seconds from the platform's own data, not the media element, which may
+   * be playing an ad. Infinity for live streams; null while not known.
+   */
+  lengthOf?(mediaId: string): number | null;
 }
 
 /**

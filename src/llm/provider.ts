@@ -64,3 +64,9 @@ export interface LlmProvider {
   readonly models: readonly { id: string; label: string }[];
   detect(input: DetectionInput, options: DetectOptions): Promise<DetectionResult>;
 }
+
+/**
+ * Detection failed after the provider accepted the request, so tokens were (or may have been) spent.
+ * The caller remembers the failure for a while instead of paying again on the next visit.
+ */
+export class SpentError extends Error {}

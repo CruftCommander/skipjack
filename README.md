@@ -4,15 +4,15 @@
 
 Skipjack is a browser extension that skips the sponsor reads, interaction reminders, and self-promotion that creators record into their own videos. It works on YouTube in Microsoft Edge and Chrome, with Firefox support built but untested.
 
-Skipjack is in early development. Today it skips segments that the [SponsorBlock](https://sponsor.ajay.app) community has already marked. Automatic detection from the video's transcript, for videos nobody has marked, comes next.
+Skipjack is in early development. It skips segments that the [SponsorBlock](https://sponsor.ajay.app) community has already marked, and, with your own Anthropic API key, finds the ones nobody has marked by reading the video's captions.
 
 ## Status
 
 | Step | What it delivers | State |
 | --- | --- | --- |
 | 1. Signal probe | A throwaway extension in [`probe/`](probe/README.md) that measured which signals YouTube exposes | Done |
-| 2. Skeleton | The extension: SponsorBlock lookup, skipping, the skip toast with Undo, and settings | In progress |
-| 3. Detection | Transcript analysis with your own LLM provider and key, starting with Anthropic | Not started |
+| 2. Skeleton | The extension: SponsorBlock lookup, skipping, the skip toast with Undo, and settings | Done |
+| 3. Detection | Transcript analysis with your own LLM provider and key, starting with Anthropic | In progress |
 | 4. Packaging | Store-ready packages for Chromium and Firefox from one release workflow | Not started |
 
 ## What it skips
@@ -31,7 +31,9 @@ Other behavior you can change on the settings page:
 
 - **Short segments.** Interaction reminders and self-promotion shorter than 5 seconds are left alone. Sponsor reads are skipped at any length.
 - **Near the end of a video.** Skipping a segment that runs to the end jumps to the end screen, which can start the next video. By default, when a skip would land within 5 seconds of the end, Skipjack lets the segment play. You can choose to skip anyway, or to skip and pause. A sponsor read is never left to play: with the default setting, it is skipped and the video pauses.
-- **Channels.** You can turn skipping off for a channel. Select the Skipjack button in the toolbar while one of its videos is open, and clear **Skip segments on this channel**. You can also add a channel by URL, @handle, or channel ID on the settings page, under **Channels**. Skipjack doesn't look up videos from an excluded channel at all. The list syncs with your browser profile and holds up to 100 channels.
+- **Channels.** You can turn skipping off for a channel. Select the Skipjack button in the toolbar while one of its videos is open, and clear **Skip segments on this channel**. You can also add a channel by URL, @handle, or channel ID on the settings page, under **Channels**. Skipjack doesn't look up videos from an excluded channel at all. The list syncs with your browser profile and holds up to 250 channels.
+- **Detection.** Add an Anthropic API key on the settings page, under **Detection**, and Skipjack reads each video's captions and asks Claude where the pitches are. By default it runs on every video and fills in only the categories SponsorBlock has no segments for; SponsorBlock's segments win wherever they exist. Each video is analyzed once and the result is kept on this computer; if analysis fails partway, the video isn't tried again for a day, and Skipjack analyzes at most 60 new videos an hour. On Claude Sonnet 5.5, the default, a 20-minute video costs about 2 cents. To read the captions, Skipjack switches them on for a moment with the captions hidden from view, then switches them back; you can turn that off, and detection then runs only on videos you watch with captions on.
+- **Undo shortcut.** Alt+Shift+U undoes the last skip, whether or not the skip message is showing. To change it in Edge, open `edge://extensions/shortcuts`; in Chrome, `chrome://extensions/shortcuts`. In Firefox, open `about:addons`, select the gear button, and then select **Manage Extension Shortcuts**.
 - **Skip message.** After each skip, a message with an **Undo** button appears in the player for 6 seconds. Undo returns to the start of the segment and lets it play.
 
 Skipjack never skips while YouTube is playing one of its own ads, and it leaves YouTube Shorts alone.
@@ -98,7 +100,12 @@ The rest:
 
 ## Privacy
 
-Skipjack sends one kind of request: a segment lookup to SponsorBlock. The request carries the first 4 characters of the SHA-256 hash of the video ID, not the ID itself, so SponsorBlock cannot tell which video you are watching. Your settings are stored in your browser's synced extension storage. Skipjack keeps no history.
+Skipjack keeps no history and has no server of its own. It sends two kinds of request:
+
+- **A segment lookup to SponsorBlock.** The request carries the first 4 characters of the SHA-256 hash of the video ID, not the ID itself, so SponsorBlock cannot tell which video you are watching.
+- **Detection requests to Anthropic, only if you add an API key.** For each video analyzed, Skipjack sends the video's captions, title, chapter titles, whether it is marked as paid promotion, and any description lines that look promotional, using your key. Anthropic's terms for your account apply to that data.
+
+Your settings and excluded channels are stored in your browser's synced extension storage. Your API key and the detection results stay in local extension storage on this computer, never sync, and are never visible to web pages.
 
 ## Attribution
 

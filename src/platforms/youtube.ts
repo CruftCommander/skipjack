@@ -1,7 +1,9 @@
 // YouTube adapter. Every YouTube quirk stays in this file and youtube-main.ts.
 
 import { normalizeHandle, type ChannelRef } from '../core/channels';
-import type { ChannelSyntax, PlatformAdapter } from './platform';
+import { MAX_CHAPTERS, MAX_CUES, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../core/messages';
+import { MIN_DETECTION_SECONDS } from '../core/sources';
+import type { ChannelSyntax, PlatformAdapter, TranscriptResult } from './platform';
 
 export const YOUTUBE_ID = 'youtube';
 
@@ -11,6 +13,58 @@ export const PLAYER_VIDEO_ATTR = 'data-skipjack-player-video';
 export const PLAYER_CHANNEL_ID_ATTR = 'data-skipjack-channel-id';
 export const PLAYER_CHANNEL_NAME_ATTR = 'data-skipjack-channel-name';
 export const PLAYER_CHANNEL_HANDLE_ATTR = 'data-skipjack-channel-handle';
+export const PLAYER_LENGTH_ATTR = 'data-skipjack-length';
+export const MIN_DETECT_SECONDS = MIN_DETECTION_SECONDS;
+/** Transcript requests: the isolated script writes the request here, then fires the event. */
+export const TRANSCRIPT_CANCEL_EVENT = 'skipjack:yt-transcript-cancel';
+export const TRANSCRIPT_REQUEST_EVENT = 'skipjack:yt-transcript-request';
+export const TRANSCRIPT_REQUEST_ATTR = 'data-skipjack-transcript-request';
+/** The page-world script answers with window.postMessage, tagged with this source. */
+export const TRANSCRIPT_MESSAGE_SOURCE = 'skipjack-yt-transcript';
+
+export interface TranscriptRequest {
+  nonce: string;
+  videoId: string;
+  allowToggle: boolean;
+}
+
+/** What youtube-main.ts posts back. Cues are [startSeconds, durationSeconds, text]. */
+export type TranscriptReply =
+  | {
+      source: typeof TRANSCRIPT_MESSAGE_SOURCE;
+      nonce: string;
+      ok: true;
+      videoId: string;
+      title: string;
+      lengthSeconds: number;
+      cues: [number, number, string][];
+      chapters: { title: string; start: number }[];
+      paidPromotion: boolean;
+      promoLines: string[];
+      track: { lang: string | null; kind: string | null };
+    }
+  | { source: typeof TRANSCRIPT_MESSAGE_SOURCE; nonce: string; ok: false; videoId: string; reason: string; retry: boolean };
+
+/** Parses YouTube's json3 caption format into [startSeconds, durationSeconds, text] cues. */
+export function parseJson3(body: string): [number, number, string][] {
+  let json: { events?: { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string }[] }[] };
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return [];
+  }
+  const out: [number, number, string][] = [];
+  for (const e of json.events ?? []) {
+    if (!Array.isArray(e.segs)) continue;
+    const text = e.segs.map((s) => s.utf8 ?? '').join('').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    out.push([(e.tStartMs ?? 0) / 1000, (e.dDurationMs ?? 0) / 1000, text]);
+  }
+  return out;
+}
+
+/** Description lines that look promotional. A hint for detection, never proof. */
+export const PROMO_LINE = /\b(sponsor\w*|promo(tion)?\s*code|coupon|discount|use (the )?code|\d{1,3}\s?% off|free trial|affiliate|paid promotion)\b/i;
 
 const HOSTS = new Set(['www.youtube.com', 'm.youtube.com', 'youtube.com']);
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -18,6 +72,56 @@ const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
 /** YouTube handles: 3 to 30 letters or digits in any script, plus `.`, `_`, `-`, and `·`. */
 const HANDLE = /^@?([\p{L}\p{M}\p{N}._\-\u00B7]{3,30})$/u;
 const POLL_MS = 1000;
+/** Longest wait for the page-world script's answer: it may wait out an ad of up to 90 s. */
+const TRANSCRIPT_TIMEOUT_MS = 120_000;
+/**
+ * Limits on what the page may hand over. The page writes the transcript, so these bound what a
+ * misbehaving page could make detection spend. 400,000 characters is about 7 hours of speech.
+ */
+
+/** Validates and converts the page-world script's reply. Throws on a malformed one. */
+function toResult(r: TranscriptReply, mediaId: string): TranscriptResult {
+  if (!r.ok) return { ok: false, reason: String(r.reason).slice(0, 200), retry: Boolean(r.retry) };
+  if (r.videoId !== mediaId || !Array.isArray(r.cues)) throw new Error('mismatched reply');
+  const length = Number(r.lengthSeconds);
+  if (!Number.isFinite(length) || length < MIN_DETECTION_SECONDS) return { ok: false, reason: 'too short or live', retry: false };
+  // Kept within the limits the background script checks (isDetectRequest), so a real transcript is
+  // never refused there.
+  const transcript: { start: number; duration: number; text: string }[] = [];
+  let chars = 0;
+  for (const c of r.cues) {
+    if (!Array.isArray(c) || c.length !== 3) continue;
+    const [start, duration, text] = [Number(c[0]), Number(c[1]), String(c[2]).slice(0, 1000)];
+    if (!Number.isFinite(start) || !Number.isFinite(duration) || start < 0 || start > length + 60) continue;
+    chars += text.length;
+    if (chars > MAX_TRANSCRIPT_CHARS || transcript.length >= MAX_CUES) return { ok: false, reason: 'transcript too long', retry: false };
+    transcript.push({ start, duration: Math.min(Math.max(duration, 0), 3600), text });
+  }
+  if (transcript.length === 0) return { ok: false, reason: 'empty transcript', retry: true };
+  const chapters = (Array.isArray(r.chapters) ? r.chapters : [])
+    .slice(0, MAX_CHAPTERS)
+    .map((c) => ({ title: String(c?.title ?? '').slice(0, 200), start: Number(c?.start) }))
+    .filter((c) => Number.isFinite(c.start) && c.start >= 0 && c.start <= length);
+  return {
+    ok: true,
+    input: {
+      media: { platform: YOUTUBE_ID, id: mediaId },
+      title: String(r.title ?? '').slice(0, 300),
+      durationSeconds: length,
+      transcript,
+      signals: {
+        chapters,
+        paidPromotion: r.paidPromotion === true,
+        descriptionPromoLines: (Array.isArray(r.promoLines) ? r.promoLines : []).slice(0, MAX_PROMO_LINES).map((l) => String(l).slice(0, 200)),
+      },
+    },
+  };
+}
+
+function isReply(data: unknown, nonce: string): data is TranscriptReply {
+  const d = data as Partial<TranscriptReply> | null;
+  return !!d && typeof d === 'object' && d.source === TRANSCRIPT_MESSAGE_SOURCE && d.nonce === nonce;
+}
 
 function validId(id: string | null | undefined): string | null {
   return id && VIDEO_ID.test(id) ? id : null;
@@ -85,7 +189,13 @@ export function createYouTubeAdapter(doc: Document = document, win: Window = win
    * Asks youtube-main.ts, in the page's own world, what the player holds. The event is dispatched
    * synchronously, so the attributes are current when they are read. Empty means unknown.
    */
-  const queryPlayer = (): { video: string | null; channelId: string | null; channelName: string | null; channelHandle: string | null } => {
+  const queryPlayer = (): {
+    video: string | null;
+    channelId: string | null;
+    channelName: string | null;
+    channelHandle: string | null;
+    length: string | null;
+  } => {
     doc.dispatchEvent(new CustomEvent(PLAYER_QUERY_EVENT));
     const root = doc.documentElement;
     return {
@@ -93,6 +203,7 @@ export function createYouTubeAdapter(doc: Document = document, win: Window = win
       channelId: root.getAttribute(PLAYER_CHANNEL_ID_ATTR) || null,
       channelName: root.getAttribute(PLAYER_CHANNEL_NAME_ATTR) || null,
       channelHandle: root.getAttribute(PLAYER_CHANNEL_HANDLE_ATTR) || null,
+      length: root.getAttribute(PLAYER_LENGTH_ATTR) || null,
     };
   };
 
@@ -155,6 +266,42 @@ export function createYouTubeAdapter(doc: Document = document, win: Window = win
       const handle = player.channelHandle ? handleFromUrl(player.channelHandle) : null;
       if (handle) channel.handle = handle;
       return channel.id || channel.handle ? channel : null;
+    },
+
+    lengthOf(mediaId) {
+      // From the player response for this video: the <video> element may be playing an ad.
+      const player = queryPlayer();
+      if (player.video !== mediaId || player.length === null) return null;
+      const n = Number(player.length);
+      return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+    },
+
+    cancelTranscript() {
+      doc.dispatchEvent(new CustomEvent(TRANSCRIPT_CANCEL_EVENT));
+    },
+
+    readTranscript(mediaId, { allowToggle }): Promise<TranscriptResult> {
+      const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      return new Promise<TranscriptResult>((resolve) => {
+        const done = (result: TranscriptResult): void => {
+          win.removeEventListener('message', onMessage);
+          win.clearTimeout(timer);
+          resolve(result);
+        };
+        const onMessage = (event: MessageEvent): void => {
+          if (event.source !== win || !isReply(event.data, nonce)) return;
+          try {
+            done(toResult(event.data, mediaId));
+          } catch {
+            done({ ok: false, reason: 'malformed transcript reply', retry: false });
+          }
+        };
+        const timer = win.setTimeout(() => done({ ok: false, reason: 'no answer from the page', retry: true }), TRANSCRIPT_TIMEOUT_MS);
+        win.addEventListener('message', onMessage);
+        const request: TranscriptRequest = { nonce, videoId: mediaId, allowToggle };
+        doc.documentElement.setAttribute(TRANSCRIPT_REQUEST_ATTR, JSON.stringify(request));
+        doc.dispatchEvent(new CustomEvent(TRANSCRIPT_REQUEST_EVENT));
+      });
     },
 
     overlayHost() {

@@ -10,6 +10,20 @@ export type EndOfVideoAction = 'play' | 'skip' | 'skipAndPause';
 
 export const END_OF_VIDEO_ACTIONS: readonly EndOfVideoAction[] = ['play', 'skip', 'skipAndPause'];
 
+/**
+ * When transcript detection runs.
+ * - `fillGaps`: on every video, for the categories SponsorBlock has no segments for. SponsorBlock
+ *   wins wherever it has a category.
+ * - `noCommunity`: only on videos SponsorBlock has no segments for at all.
+ * - `off`: never.
+ */
+export type DetectionMode = 'fillGaps' | 'noCommunity' | 'off';
+
+export const DETECTION_MODES: readonly DetectionMode[] = ['fillGaps', 'noCommunity', 'off'];
+
+/** The model detection uses unless the user picks another. Chosen by the eval on 2026-10-21. */
+export const DEFAULT_MODEL = 'claude-sonnet-5-5';
+
 export interface Settings {
   /** Master switch. */
   enabled: boolean;
@@ -26,6 +40,17 @@ export interface Settings {
    * show any part of the pitch.
    */
   margin: { beforeSeconds: number; afterSeconds: number };
+  /** Transcript detection. The API key is not here: it stays in local storage on this computer. */
+  detection: {
+    mode: DetectionMode;
+    /** Model ID, for example `claude-sonnet-5-5`. */
+    model: string;
+    /**
+     * Turn captions on for a moment, with the overlay hidden, so the player fetches the transcript.
+     * Off: detection runs only when the viewer already has captions on.
+     */
+    captionsToggle: boolean;
+  };
 }
 
 export const SETTINGS_KEY = 'settings';
@@ -37,6 +62,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze<Settings>({
   toast: { enabled: true },
   endOfVideo: { action: 'play', thresholdSeconds: 5 },
   margin: { beforeSeconds: 0.5, afterSeconds: 0.5 },
+  detection: { mode: 'fillGaps', model: DEFAULT_MODEL, captionsToggle: true },
 });
 
 export const LIMITS = {
@@ -70,6 +96,7 @@ export function normalizeSettings(raw: unknown): Settings {
   const toast = obj(r.toast);
   const end = obj(r.endOfVideo);
   const margin = obj(r.margin);
+  const detection = obj(r.detection);
 
   const categories = {} as Record<Category, boolean>;
   for (const c of CATEGORIES) categories[c] = bool(cats[c], d.categories[c]);
@@ -93,6 +120,11 @@ export function normalizeSettings(raw: unknown): Settings {
     margin: {
       beforeSeconds: num(margin.beforeSeconds, d.margin.beforeSeconds, LIMITS.marginSeconds),
       afterSeconds: num(margin.afterSeconds, d.margin.afterSeconds, LIMITS.marginSeconds),
+    },
+    detection: {
+      mode: (DETECTION_MODES as readonly unknown[]).includes(detection.mode) ? (detection.mode as DetectionMode) : d.detection.mode,
+      model: typeof detection.model === 'string' && /^[a-z0-9][a-z0-9.-]{2,80}$/.test(detection.model) ? detection.model : d.detection.model,
+      captionsToggle: bool(detection.captionsToggle, d.detection.captionsToggle),
     },
   };
 }

@@ -6,10 +6,18 @@ import type { ChannelStore } from '../browser/channel-store';
 import type { BrowserShell } from '../browser/shell';
 import { isExcluded, needsHandle, type ChannelRef } from '../core/channels';
 import { formatTime } from '../core/format';
-import type { GetSegmentsRequest, GetSegmentsResponse } from '../core/messages';
+import type {
+  DetectionStatusRequest,
+  DetectionStatusResponse,
+  DetectRequest,
+  DetectResponse,
+  GetSegmentsRequest,
+  GetSegmentsResponse,
+} from '../core/messages';
 import { planSkips } from '../core/policy';
 import type { Settings } from '../core/settings';
 import { SkipController, type SkipEvent } from '../core/skipper';
+import { DETECTION_SOURCE, mergeSources, shouldDetect } from '../core/sources';
 import { CATEGORY_LABELS, type Category, type MediaRef, type Segment } from '../core/types';
 import type { PlatformAdapter } from '../platforms/platform';
 import type { Toast } from '../ui/toast';
@@ -24,9 +32,16 @@ const CHANNEL_WAIT_MS = 4000;
 const CHANNEL_POLL_MS = 200;
 /** While held back, how often to re-check whether the channel is still excluded. */
 const HELD_BACK_RECHECK_MS = 2000;
+/** Transcript attempts, and how long the video must play between them. */
+const TRANSCRIPT_ATTEMPTS = 3;
+const TRANSCRIPT_RETRY_PLAY_MS = 10_000;
 
 export class Session {
+  /** What the community database returned. */
+  private community: Segment[] = [];
+  /** Community segments plus detected ones for the categories the community lacks. */
   private segments: Segment[] = [];
+  private lastSkip: SkipEvent | null = null;
   private controller: SkipController | null = null;
   private element: HTMLMediaElement | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
@@ -89,6 +104,7 @@ export class Session {
     if (this.poll) clearInterval(this.poll);
     if (this.retry) clearTimeout(this.retry);
     if (this.recheck) clearInterval(this.recheck);
+    this.adapter.cancelTranscript?.();
     this.controller?.destroy();
     this.controller = null;
     this.toast.hide();
@@ -157,18 +173,134 @@ export class Session {
       const error = response?.error ?? 'no response';
       log.warn(`segment lookup failed for ${this.media.id}: ${error}${delay ? `; retrying in ${delay / 1000} s` : ''}`);
       if (delay) this.retry = setTimeout(() => void this.lookup(attempt + 1), delay);
+      // SponsorBlock is unreachable: detection can still cover the video on its own.
+      else void this.detect().catch((e: unknown) => log.warn(`detection failed for ${this.media.id}: ${String(e)}`));
       return;
     }
+    this.community = response.segments;
     this.segments = response.segments;
     const plan = planSkips(this.segments, this.settings);
     log.info(
       `${this.media.id}: ${this.segments.length} segment(s) from ${response.sources.join(', ') || 'no source'}, ` +
         `${plan.length} to skip with current settings`,
     );
-    if (this.segments.length === 0) return;
+    if (this.segments.length > 0) this.startAttaching();
+    void this.detect().catch((error: unknown) => log.warn(`detection failed for ${this.media.id}: ${String(error)}`));
+  }
 
+  private startAttaching(): void {
+    if (this.poll || this.destroyed) return;
     this.attach();
     this.poll = setInterval(() => this.attach(), ELEMENT_POLL_MS);
+  }
+
+  /** Undoes the most recent skip in this video. Returns false when there is nothing to undo. */
+  undoLast(): boolean {
+    return this.lastSkip ? this.undo(this.lastSkip) : false;
+  }
+
+  /** The one undo path, for the toast and the shortcut, so a skip is never undone twice. */
+  private undo(event: SkipEvent): boolean {
+    if (!this.controller) return false;
+    this.controller.undo(event);
+    this.toast.hide();
+    if (this.lastSkip === event) this.lastSkip = null;
+    return true;
+  }
+
+  /** Detection may run now: re-read before every step, because settings can change mid-way. */
+  private detectionAllowed(): boolean {
+    const { enabled, detection } = this.settings;
+    return !this.destroyed && enabled && detection.mode !== 'off' && !this.isExcluded();
+  }
+
+  /**
+   * Transcript detection for the categories the community database lacks. Costs tokens, so it checks
+   * the cache and the API key before touching the captions.
+   */
+  private async detect(): Promise<void> {
+    if (!this.adapter.readTranscript || !this.detectionAllowed()) return;
+
+    // The length comes from the platform's data for this media: the media element may be playing
+    // an ad, or still hold the previous video.
+    const length = await this.waitForLength();
+    if (!this.detectionAllowed() || !shouldDetect(this.settings.detection.mode, this.community, this.settings, length)) return;
+    const element = await this.waitForElement();
+    if (!element || !this.detectionAllowed()) return;
+
+    const model = this.settings.detection.model;
+    const statusRequest: DetectionStatusRequest = { type: 'detectionStatus', media: this.media, model };
+    const status = await this.shell.sendMessage<DetectionStatusResponse>(statusRequest);
+    if (!this.detectionAllowed()) return;
+    if (!status?.ok) {
+      log.warn(`${this.media.id}: ${status?.error ?? 'no answer from the background script'}; no transcript detection`);
+      return;
+    }
+    if (status.cached) return this.applyDetected(status.cached, true);
+    if (!status.keySet) {
+      log.info(`${this.media.id}: no API key set, so no transcript detection`);
+      return;
+    }
+
+    for (let attempt = 1; attempt <= TRANSCRIPT_ATTEMPTS; attempt++) {
+      if (!this.detectionAllowed()) return;
+      const transcript = await this.adapter.readTranscript(this.media.id, { allowToggle: this.settings.detection.captionsToggle });
+      if (!this.detectionAllowed()) return;
+      if (transcript.ok) {
+        const request: DetectRequest = { type: 'detect', model: this.settings.detection.model, input: transcript.input };
+        log.info(`${this.media.id}: detecting with ${request.model} (${transcript.input.transcript.length} caption lines)`);
+        const result = await this.shell.sendMessage<DetectResponse>(request);
+        if (this.destroyed) return;
+        if (!result?.ok) {
+          log.warn(`${this.media.id}: detection failed: ${result?.error ?? 'no response'}`);
+          return;
+        }
+        if (!result.cached) log.info(`${this.media.id}: detection used ${result.inputTokens} input and ${result.outputTokens} output tokens`);
+        return this.applyDetected(result.segments, result.cached);
+      }
+      log.warn(`${this.media.id}: no transcript (attempt ${attempt} of ${TRANSCRIPT_ATTEMPTS}): ${transcript.reason}`);
+      if (!transcript.retry || attempt === TRANSCRIPT_ATTEMPTS) return;
+      // The player often fetches captions only once playback is under way, so retry after the
+      // video has played a while rather than after a fixed delay.
+      await this.waitForPlayback(element, TRANSCRIPT_RETRY_PLAY_MS);
+    }
+  }
+
+  private async waitForLength(timeoutMs = 15000): Promise<number> {
+    const until = Date.now() + timeoutMs;
+    for (;;) {
+      const n = this.adapter.lengthOf?.(this.media.id) ?? null;
+      if (n !== null || this.destroyed || Date.now() > until) return n ?? Number.NaN;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  private applyDetected(detected: Segment[], cached: boolean): void {
+    if (this.destroyed) return;
+    this.segments = mergeSources(this.community, detected);
+    const used = this.segments.filter((s) => s.source === DETECTION_SOURCE).length;
+    log.info(`${this.media.id}: ${detected.length} detected segment(s)${cached ? ' (cached)' : ''}, ${used} used alongside SponsorBlock`);
+    if (this.segments.length === 0) return;
+    this.startAttaching();
+    this.controller?.update(planSkips(this.segments, this.settings), this.settings);
+  }
+
+  private async waitForElement(timeoutMs = 15000): Promise<HTMLMediaElement | null> {
+    const until = Date.now() + timeoutMs;
+    for (;;) {
+      const el = this.adapter.findMediaElement();
+      if (el || this.destroyed || Date.now() > until) return el;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  /** Resolves once the element has played for `ms` in total, however many pauses that takes. */
+  private async waitForPlayback(el: HTMLMediaElement, ms: number): Promise<void> {
+    let played = 0;
+    while (!this.destroyed && played < ms) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (!el.paused) played += 500;
+    }
   }
 
   /** Starts a controller on the current media element, or moves it if the platform swapped elements. */
@@ -197,18 +329,20 @@ export class Session {
   }
 
   private onSkip(event: SkipEvent): void {
+    this.lastSkip = event;
     const categories = event.run.windows.map((w) => w.segment.category);
+    const detected = event.run.windows.some((w) => w.segment.source === DETECTION_SOURCE);
     log.info(
       `skipped ${categories.join(' + ')} ${formatTime(event.fromTime)} -> ${formatTime(event.toTime)}` +
         (event.paused ? ' and paused' : ''),
     );
     if (!this.settings.toast.enabled) return;
-    const label = describe(categories);
+    const label = describe(categories) + (detected ? ' (detected)' : '');
     const message = event.paused
       ? `Skipped ${label} and paused`
       : `Skipped ${label} (${formatTime(event.toTime - event.fromTime)})`;
     const controller = this.controller;
-    this.toast.show(this.adapter.overlayHost(), message, controller ? () => controller.undo(event) : null);
+    this.toast.show(this.adapter.overlayHost(), message, controller ? () => void this.undo(event) : null);
   }
 }
 

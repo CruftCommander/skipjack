@@ -7,6 +7,15 @@
 export interface BrowserShell {
   getSynced(key: string): Promise<unknown>;
   setSynced(key: string, value: unknown): Promise<void>;
+  /** Local storage stays on this computer and never syncs: API keys and caches live here. */
+  getLocal(key: string): Promise<unknown>;
+  getAllLocal(): Promise<Record<string, unknown>>;
+  setLocalItems(items: Record<string, unknown>): Promise<void>;
+  removeLocal(keys: string[]): Promise<void>;
+  /** Calls `listener` with the changed keys whenever anything in local storage changes. */
+  onLocalKeysChanged(listener: (keys: string[]) => void): void;
+  /** Calls `listener` when the user presses one of the extension's keyboard shortcuts. */
+  onCommand(listener: (command: string) => void): void;
   /** Every item in synced storage. */
   getAllSynced(): Promise<Record<string, unknown>>;
   setSyncedItems(items: Record<string, unknown>): Promise<void>;
@@ -53,6 +62,26 @@ export function createWebExtShell(): BrowserShell {
     },
     async setSynced(key, value) {
       await ext.storage.sync.set({ [key]: value });
+    },
+    async getLocal(key) {
+      return (await ext.storage.local.get(key))[key];
+    },
+    async getAllLocal() {
+      return (await ext.storage.local.get(null)) as Record<string, unknown>;
+    },
+    async setLocalItems(items) {
+      await ext.storage.local.set(items);
+    },
+    async removeLocal(keys) {
+      await ext.storage.local.remove(keys);
+    },
+    onLocalKeysChanged(listener) {
+      ext.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local') listener(Object.keys(changes));
+      });
+    },
+    onCommand(listener) {
+      ext.commands?.onCommand.addListener((command) => listener(command));
     },
     async getAllSynced() {
       return (await ext.storage.sync.get(null)) as Record<string, unknown>;

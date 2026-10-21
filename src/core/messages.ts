@@ -1,6 +1,7 @@
 // Typed messages between the content script, the background script, and the popup.
 
 import type { ChannelRef } from './channels';
+import type { DetectionInput } from '../llm/provider';
 import type { MediaRef, Segment } from './types';
 
 export interface GetSegmentsRequest {
@@ -40,4 +41,103 @@ export type GetChannelResponse =
 
 export function isGetChannelRequest(value: unknown): value is GetChannelRequest {
   return value !== null && typeof value === 'object' && (value as { type?: unknown }).type === 'getChannel';
+}
+
+/** Content to background: is a detection result cached, and could detection run at all? */
+export interface DetectionStatusRequest {
+  type: 'detectionStatus';
+  media: MediaRef;
+  model: string;
+}
+
+export type DetectionStatusResponse = { ok: true; cached: Segment[] | null; keySet: boolean } | { ok: false; error: string };
+
+/** Content to background: run detection on this transcript. */
+export interface DetectRequest {
+  type: 'detect';
+  model: string;
+  input: DetectionInput;
+}
+
+export type DetectResponse =
+  | { ok: true; segments: Segment[]; cached: boolean; inputTokens: number; outputTokens: number }
+  | { ok: false; error: string };
+
+/** Background to content (active tab): the undo shortcut was pressed. */
+export interface UndoLastSkipRequest {
+  type: 'undoLastSkip';
+}
+
+/** The most cues a transcript may carry: about 6 hours of auto-captions. */
+export const MAX_CUES = 12000;
+
+function isMediaRef(v: unknown): v is MediaRef {
+  const m = v as Record<string, unknown> | null;
+  return !!m && typeof m === 'object' && typeof m.platform === 'string' && typeof m.id === 'string' && m.platform.length > 0 && m.id.length > 0;
+}
+
+export function isDetectionStatusRequest(v: unknown): v is DetectionStatusRequest {
+  const r = v as Record<string, unknown> | null;
+  return !!r && r.type === 'detectionStatus' && isMediaRef(r.media) && typeof r.model === 'string';
+}
+
+/** Limits on what a content script may ask the background to send to a provider. */
+export const MAX_TRANSCRIPT_CHARS = 400_000;
+export const MAX_CHAPTERS = 100;
+export const MAX_PROMO_LINES = 10;
+const MAX_LINE_CHARS = 2000;
+/** Longer than any real video; a guard against nonsense, not a policy. */
+const MAX_DURATION_SECONDS = 48 * 3600;
+
+function finiteIn(v: unknown, min: number, max: number): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+}
+
+function shortString(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= MAX_LINE_CHARS;
+}
+
+function isSignals(v: unknown, duration: number): boolean {
+  if (v === undefined) return true;
+  if (!v || typeof v !== 'object') return false;
+  const s = v as Record<string, unknown>;
+  if (s.paidPromotion !== undefined && typeof s.paidPromotion !== 'boolean') return false;
+  if (s.chapters !== undefined) {
+    if (!Array.isArray(s.chapters) || s.chapters.length > MAX_CHAPTERS) return false;
+    const ok = s.chapters.every((c) => {
+      const ch = c as Record<string, unknown> | null;
+      return !!ch && shortString(ch.title) && finiteIn(ch.start, 0, duration);
+    });
+    if (!ok) return false;
+  }
+  if (s.descriptionPromoLines !== undefined) {
+    if (!Array.isArray(s.descriptionPromoLines) || s.descriptionPromoLines.length > MAX_PROMO_LINES) return false;
+    if (!s.descriptionPromoLines.every(shortString)) return false;
+  }
+  return true;
+}
+
+export function isDetectRequest(v: unknown): v is DetectRequest {
+  const r = v as Record<string, unknown> | null;
+  if (!r || r.type !== 'detect' || typeof r.model !== 'string' || r.model.length > 100) return false;
+  const input = r.input as Record<string, unknown> | null;
+  if (!input || !isMediaRef(input.media)) return false;
+  if (!finiteIn(input.durationSeconds, 1, MAX_DURATION_SECONDS)) return false;
+  if (input.title !== undefined && !shortString(input.title)) return false;
+  const duration = input.durationSeconds;
+  if (!input.signals || !isSignals(input.signals, duration)) return false;
+  const t = input.transcript;
+  if (!Array.isArray(t) || t.length === 0 || t.length > MAX_CUES) return false;
+  let chars = 0;
+  for (const c of t) {
+    const cue = c as Record<string, unknown> | null;
+    if (!cue || !finiteIn(cue.start, 0, duration + 60) || !finiteIn(cue.duration, 0, 3600) || !shortString(cue.text)) return false;
+    chars += cue.text.length;
+    if (chars > MAX_TRANSCRIPT_CHARS) return false;
+  }
+  return true;
+}
+
+export function isUndoLastSkipRequest(v: unknown): v is UndoLastSkipRequest {
+  return !!v && typeof v === 'object' && (v as { type?: unknown }).type === 'undoLastSkip';
 }

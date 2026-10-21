@@ -22,7 +22,11 @@ function manifest(target) {
     version: pkg.version,
     description: 'Skip the pitch. Skips sponsor reads, interaction reminders, and self-promotion in videos.',
     permissions: ['storage'],
-    host_permissions: ['https://sponsor.ajay.app/*'],
+    // SponsorBlock for community segments; Anthropic for detection with the user's own key.
+    host_permissions: ['https://sponsor.ajay.app/*', 'https://api.anthropic.com/*'],
+    commands: {
+      'undo-skip': { suggested_key: { default: 'Alt+Shift+U' }, description: 'Undo the last skip' },
+    },
     action: { default_title: 'Skipjack', default_popup: 'popup.html' },
     options_ui: { page: 'options.html', open_in_tab: true },
     content_scripts: [
@@ -41,8 +45,9 @@ function manifest(target) {
       gecko: {
         id: 'skipjack@cruftcommander.github.io',
         strict_min_version: '128.0',
-        // Required by addons.mozilla.org for new submissions. The only request Skipjack makes sends
-        // a 4-character hash prefix that does not identify the video. Revisit before publishing.
+        // Required by addons.mozilla.org for new submissions. Revisit before publishing: detection
+        // sends a video's captions to Anthropic when the user adds a key, which AMO may class as
+        // website content.
         data_collection_permissions: { required: ['none'] },
       },
     };

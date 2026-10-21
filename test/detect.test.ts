@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildUserMessage, SYSTEM_PROMPT, TOOL, transcriptLines } from '../src/detect/prompt';
 import { parseToolInput, quotePosition, refine, toTimed } from '../src/detect/postprocess';
-import { ANTHROPIC_URL, buildRequest, createAnthropicProvider } from '../src/llm/anthropic';
+import { ANTHROPIC_URL, buildRequest, createAnthropicProvider, readStream } from '../src/llm/anthropic';
+import { SpentError } from '../src/llm/provider';
 import type { DetectionInput } from '../src/llm/provider';
 import { reportToInput } from '../eval/report';
 import { scoreVideo } from '../eval/score';
@@ -171,18 +172,42 @@ test('refine clamps, drops empty and tiny segments, and sorts', () => {
   assert.deepEqual(out.map((s) => [s.start, s.end]), [[0, 6], [50, 815]]);
 });
 
-test('the provider calls the Messages API with the BYOK headers and parses the tool call', async () => {
+/** A streamed Messages API response, cut into small chunks so events straddle reads. */
+function sse(events: Record<string, unknown>[], chunkSize = 7): Response {
+  const text = events.map((e) => `event: ${String(e.type)}\ndata: ${JSON.stringify(e)}\n\n`).join('');
+  const bytes = new TextEncoder().encode(text);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < bytes.length; i += chunkSize) controller.enqueue(bytes.slice(i, i + chunkSize));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+function toolStream(toolInput: unknown, model = 'claude-haiku-5-5'): Record<string, unknown>[] {
+  const json = JSON.stringify(toolInput);
+  const half = Math.floor(json.length / 2);
+  return [
+    { type: 'message_start', message: { model, usage: { input_tokens: 1200, output_tokens: 1 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'ping' },
+    { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 't1', name: TOOL.name, input: {} } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: json.slice(0, half) } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: json.slice(half) } },
+    { type: 'content_block_stop', index: 1 },
+    { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 80 } },
+    { type: 'message_stop' },
+  ];
+}
+
+test('the provider streams the Messages API with the BYOK headers and parses the tool call', async () => {
   let seen: { url: string; init: RequestInit } | null = null;
   const provider = createAnthropicProvider(async (url, init) => {
     seen = { url, init: init ?? {} };
-    return new Response(
-      JSON.stringify({
-        model: 'claude-haiku-5-5',
-        stop_reason: 'tool_use',
-        content: [{ type: 'tool_use', id: 't1', name: TOOL.name, input: { segments: [{ category: 'sponsor', first_line: 0, first_words: "Today's video", last_line: 1, last_words: 'back to it.', confidence: 0.9 }] } }],
-        usage: { input_tokens: 1200, output_tokens: 80 },
-      }),
-      { status: 200 },
+    return sse(
+      toolStream({ segments: [{ category: 'sponsor', first_line: 0, first_words: "Today's video", last_line: 1, last_words: 'back to it.', confidence: 0.9 }] }),
     );
   });
   const r = await provider.detect(input, { apiKey: 'sk-test', model: 'claude-haiku-5-5' });
@@ -190,9 +215,19 @@ test('the provider calls the Messages API with the BYOK headers and parses the t
   const headers = seen!.init.headers as Record<string, string>;
   assert.equal(headers['x-api-key'], 'sk-test');
   assert.equal(headers['anthropic-dangerous-direct-browser-access'], 'true');
+  assert.equal(JSON.parse(String(seen!.init.body)).stream, true);
   assert.deepEqual(r.usage, { inputTokens: 1200, outputTokens: 80 });
+  assert.equal(r.model, 'claude-haiku-5-5');
   assert.deepEqual(r.segments.map((s) => s.category), ['sponsor']);
   assert.equal(r.segments[0]?.end, 314.1);
+});
+
+test('readStream handles CRLF line endings and a final event with no blank line', async () => {
+  const events = toolStream({ segments: [] });
+  const text = events.map((e) => `event: ${String(e.type)}\r\ndata: ${JSON.stringify(e)}`).join('\r\n\r\n');
+  const r = await readStream(new Response(text).body!);
+  assert.equal(r.toolJson, '{"segments":[]}');
+  assert.equal(r.stopReason, 'tool_use');
 });
 
 test('the provider falls back to an unforced tool call when a model refuses a forced one', async () => {
@@ -203,7 +238,7 @@ test('the provider falls back to an unforced tool call when a model refuses a fo
     if (body.tool_choice.type === 'tool') {
       return new Response(JSON.stringify({ error: { message: 'tool_choice: type "tool" and "any" are not supported for this model.' } }), { status: 400 });
     }
-    return new Response(JSON.stringify({ content: [{ type: 'thinking' }, { type: 'tool_use', name: TOOL.name, input: { segments: [] } }], usage: {} }), { status: 200 });
+    return sse(toolStream({ segments: [] }, 'claude-sonnet-5-5'));
   });
   const opts = { apiKey: 'k', model: 'claude-sonnet-5-5' };
   assert.deepEqual((await provider.detect(input, opts)).segments, []);
@@ -212,11 +247,30 @@ test('the provider falls back to an unforced tool call when a model refuses a fo
   assert.deepEqual(choices.map((c) => (c as { type: string }).type), ['tool', 'auto', 'auto']);
 });
 
-test('the provider reports API errors and missing tool calls', async () => {
+test('the provider separates errors before the request is accepted from failures after', async () => {
   const err = createAnthropicProvider(async () => new Response(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 }));
-  await assert.rejects(err.detect(input, { apiKey: 'bad', model: 'm' }), /Anthropic: invalid x-api-key/);
-  const none = createAnthropicProvider(async () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' }), { status: 200 }));
-  await assert.rejects(none.detect(input, { apiKey: 'k', model: 'm' }), /no report_segments call/);
+  const unauthorized = await err.detect(input, { apiKey: 'bad', model: 'm' }).catch((e: unknown) => e);
+  assert.ok(unauthorized instanceof Error && !(unauthorized instanceof SpentError));
+  assert.match((unauthorized as Error).message, /Anthropic: invalid x-api-key/);
+
+  const none = createAnthropicProvider(async () =>
+    sse([
+      { type: 'message_start', message: { model: 'm', usage: { input_tokens: 5 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+    ]),
+  );
+  await assert.rejects(none.detect(input, { apiKey: 'k', model: 'm' }), (e: unknown) => e instanceof SpentError && /no report_segments call/.test(e.message));
+
+  const overloaded = createAnthropicProvider(async () =>
+    sse([
+      { type: 'message_start', message: { model: 'm', usage: {} } },
+      { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+    ]),
+  );
+  // An error the API reports mid-stream is transient, so it is not treated as spent.
+  await assert.rejects(overloaded.detect(input, { apiKey: 'k', model: 'm' }), (e: unknown) => e instanceof Error && !(e instanceof SpentError) && /Overloaded/.test(e.message));
 });
 
 test('reportToInput reads a probe report', () => {

@@ -3,7 +3,7 @@
 
 import { createWebExtShell } from '../browser/shell';
 import { ChannelStore } from '../browser/channel-store';
-import { isGetChannelRequest, type GetChannelResponse } from '../core/messages';
+import { isGetChannelRequest, isUndoLastSkipRequest, type GetChannelResponse } from '../core/messages';
 import { normalizeSettings, SETTINGS_KEY } from '../core/settings';
 import { adapterFor } from '../platforms/registry';
 import { Toast } from '../ui/toast';
@@ -44,8 +44,10 @@ async function main(): Promise<void> {
     session?.updateExclusions(excluded);
   });
 
-  // The popup asks which channel the open video belongs to.
+  // The popup asks which channel the open video belongs to; the undo shortcut arrives from the
+  // background script.
   shell.onMessage((message) => {
+    if (isUndoLastSkipRequest(message)) return Promise.resolve({ ok: session?.undoLast() ?? false });
     if (!isGetChannelRequest(message)) return undefined;
     const reply: GetChannelResponse = session
       ? { ok: true, media: session.media, channel: session.currentChannel() }
