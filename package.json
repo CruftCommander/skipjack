@@ -10,7 +10,8 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "eval": "node scripts/eval.mjs"
   },
   "devDependencies": {
     "@types/chrome": "0.3.5",

@@ -72,6 +72,7 @@ Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each vi
 | `npm run typecheck` | Type-checks the code without building |
 | `npm test` | Runs the unit tests with Node's built-in test runner |
 | `npm run check` | Runs the type check, the tests, and the build, in that order |
+| `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an Anthropic API key. See [`eval/README.md`](eval/README.md). |
 
 ### Layout
 
@@ -81,7 +82,7 @@ Nothing that knows about YouTube, and nothing that knows about one browser, live
 | --- | --- | --- |
 | `src/platforms` | Platform adapters: finding the video, its ID, ads, and navigation for one media site | One new adapter, registered in `registry.ts` |
 | `src/sources` | Segment sources: SponsorBlock today, the transcript detector in step 3 | One new source, passed to `SegmentService` in `src/background/index.ts` |
-| `src/llm` | LLM providers for detection (interface only until step 3) | One new provider |
+| `src/llm` | LLM providers for detection. Anthropic is the first. | One new provider |
 | `src/browser` | The browser shell: storage, messaging, and extension UI calls | One new shell, if a browser ever stops matching the WebExtensions API |
 
 The rest:
@@ -89,7 +90,9 @@ The rest:
 - `src/core` holds the segment model, settings, the skip policy (`policy.ts`, pure functions), and the controller that drives one media element (`skipper.ts`).
 - `src/background` looks up segments for content scripts. Requests to SponsorBlock happen there, under the extension's host permission.
 - `src/content` follows the video the user opens and runs one session per video.
+- `src/detect` holds the detection prompt and the clean-up of model output, shared by every LLM provider.
 - `src/ui` holds the skip toast. `src/options` holds the settings page.
+- `eval` scores detection against hand-verified boundaries. It is a development tool and is not part of the extension.
 - `scripts/build.mjs` generates each target's manifest and bundles the scripts.
 
 ## Privacy
