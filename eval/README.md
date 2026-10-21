@@ -22,15 +22,23 @@ Both files stay out of Git, because `probe/reports` is ignored: each report name
 
 ## Run it
 
-In PowerShell, read the key without echoing it, run the eval, and then clear the key:
+Copy your Anthropic API key to the clipboard, and then run this in PowerShell 5.1 or 7. It reads the key from the clipboard, checks it before running, and clears the key and the clipboard afterward:
 
 ```powershell
 Set-Location D:\GitHub\SkipJack
-$secure = Read-Host -AsSecureString 'Anthropic API key'
-$env:ANTHROPIC_API_KEY = [System.Net.NetworkCredential]::new('', $secure).Password
-npm run eval
-Remove-Item Env:ANTHROPIC_API_KEY
+$key = "$(Get-Clipboard)".Trim()
+if ($key -notlike 'sk-ant-*') {
+    Write-Warning "The clipboard doesn't hold an Anthropic key (expected sk-ant-..., got $($key.Length) characters)."
+} else {
+    $env:ANTHROPIC_API_KEY = $key
+    npm run eval
+}
+Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+Remove-Variable key -ErrorAction SilentlyContinue
+Set-Clipboard -Value ' '
 ```
+
+Avoid `Read-Host -AsSecureString` for this: in some consoles, Ctrl+V pastes nothing into a hidden prompt, and the eval then gets an empty key.
 
 By default the eval runs `claude-haiku-5-5` and `claude-sonnet-5-5` over every report that has ground truth. To narrow it:
 

@@ -24,9 +24,9 @@ const arg = (name: string): string | undefined => {
 const reportsDir = arg('reports') ?? 'probe/reports';
 const models = (arg('models') ?? 'claude-haiku-5-5,claude-sonnet-5-5').split(',').map((m) => m.trim()).filter(Boolean);
 const only = arg('video');
-const apiKey = process.env.ANTHROPIC_API_KEY;
+const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
 if (!apiKey) {
-  console.error('Set ANTHROPIC_API_KEY first. See eval/README.md.');
+  console.error('ANTHROPIC_API_KEY is not set or is empty. See eval/README.md.');
   process.exit(2);
 }
 
