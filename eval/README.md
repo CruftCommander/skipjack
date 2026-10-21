@@ -12,9 +12,12 @@ The eval sends the same prompt the extension sends, through the same Anthropic p
   ```json
   {
     "wIe3eDfGKUo": [{ "category": "sponsor", "start": 226, "end": 314 }],
+    "5k_YlkT1bjc": [{ "category": "interaction", "start": 1843, "end": 1856, "endRange": [1849, 1856] }],
     "F1Yct6HDkYU": []
   }
   ```
+
+  Where you have no preference about a boundary, give `startRange` or `endRange` as `[from, to]` in seconds. Any boundary inside the range passes, and errors are measured from the range's nearest edge.
 
 - An Anthropic API key in the `ANTHROPIC_API_KEY` environment variable.
 

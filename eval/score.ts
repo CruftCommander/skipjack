@@ -8,6 +8,13 @@ export interface TruthSegment {
   category: Category;
   start: number;
   end: number;
+  /**
+   * Optional: any start in [from, to] is as good as `start`, for boundaries where Jeff has no
+   * preference. Errors are measured from the nearest edge of the range.
+   */
+  startRange?: [number, number];
+  /** Optional: any end in [from, to] is as good as `end`. */
+  endRange?: [number, number];
 }
 
 export interface Detected {
@@ -80,8 +87,8 @@ export function scoreVideo(truth: TruthSegment[], detected: Detected[]): VideoSc
     matches.push({
       truth: t,
       detected: d,
-      start: boundary(d.start - t.start, t.start - d.start),
-      end: boundary(t.end - d.end, d.end - t.end),
+      start: boundary(d.start - (t.startRange?.[1] ?? t.start), (t.startRange?.[0] ?? t.start) - d.start),
+      end: boundary((t.endRange?.[0] ?? t.end) - d.end, d.end - (t.endRange?.[1] ?? t.end)),
     });
   }
 

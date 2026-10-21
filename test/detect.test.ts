@@ -246,3 +246,12 @@ test('scoreVideo measures pitch shown and content lost per boundary', () => {
   assert.equal(s.wrongCategory[0]?.detected.category, 'selfpromo');
   assert.equal(s.falsePositives.length, 2);
 });
+
+test('scoreVideo accepts any boundary inside a ground-truth range', () => {
+  // 5k_YlkT1bjc: Jeff has no preference between ending at "see you on the next episode" and the video end.
+  const truth = [{ category: 'interaction' as const, start: 1843, end: 1856, endRange: [1849, 1856] as [number, number] }];
+  const early = scoreVideo(truth, [{ category: 'interaction', start: 1843.6, end: 1849.8 }]).matches[0]!;
+  assert.deepEqual([early.end.pitchShown, early.end.contentLost, early.end.pass], [0, 0, true]);
+  const tooEarly = scoreVideo(truth, [{ category: 'interaction', start: 1843.6, end: 1848 }]).matches[0]!;
+  assert.equal(tooEarly.end.pitchShown, 1);
+});
