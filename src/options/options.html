@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skipjack settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Skipjack</h1>
+      <p class="tagline">Skip the pitch.</p>
+    </header>
+
+    <form id="settings" novalidate>
+      <section>
+        <label class="row switch">
+          <input type="checkbox" name="enabled">
+          <span><strong>Skip segments</strong><small>Turn this off to pause Skipjack everywhere.</small></span>
+        </label>
+      </section>
+
+      <section>
+        <h2>What to skip</h2>
+        <label class="row">
+          <input type="checkbox" name="categories.sponsor">
+          <span>Sponsor reads<small>Paid promotion read by the creator.</small></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" name="categories.interaction">
+          <span>Interaction reminders<small>Requests to like, subscribe, comment, or turn on notifications.</small></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" name="categories.selfpromo">
+          <span>Self-promotion<small>Merch, memberships, Patreon, and the creator's other channels.</small></span>
+        </label>
+      </section>
+
+      <section>
+        <h2>Short segments</h2>
+        <label class="row">
+          <input type="checkbox" name="minLength.enabled">
+          <span>Leave short reminders and self-promotion alone<small>Sponsor reads are skipped at any length.</small></span>
+        </label>
+        <label class="row indent">
+          <span>Shorter than</span>
+          <input type="number" name="minLength.seconds" min="0" max="120" step="1" inputmode="numeric">
+          <span>seconds</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>Near the end of a video</h2>
+        <p class="hint">Skipping a segment that runs to the end jumps to the end screen, which can start the next video.</p>
+        <label class="row indent">
+          <span>When a skip would land within</span>
+          <input type="number" name="endOfVideo.thresholdSeconds" min="0" max="120" step="1" inputmode="numeric">
+          <span>seconds of the end</span>
+        </label>
+        <fieldset class="indent">
+          <legend class="sr-only">End of video behavior</legend>
+          <label class="row"><input type="radio" name="endOfVideo.action" value="play"><span>Don't skip<small>Let the segment play. Sponsor reads are still skipped, then paused.</small></span></label>
+          <label class="row"><input type="radio" name="endOfVideo.action" value="skip"><span>Skip<small>Jump to the end, even if the next video starts.</small></span></label>
+          <label class="row"><input type="radio" name="endOfVideo.action" value="skipAndPause"><span>Skip and pause<small>Skip the segment, then pause so the next video does not start.</small></span></label>
+        </fieldset>
+      </section>
+
+      <section>
+        <h2>Feedback</h2>
+        <label class="row">
+          <input type="checkbox" name="toast.enabled">
+          <span>Show a message with Undo after each skip</span>
+        </label>
+      </section>
+
+      <section>
+        <details>
+          <summary>Advanced</summary>
+          <p class="hint">Extra time skipped on each side of a segment, so no part of the pitch shows.</p>
+          <label class="row indent">
+            <span>Start skipping</span>
+            <input type="number" name="margin.beforeSeconds" min="0" max="5" step="0.1" inputmode="decimal">
+            <span>seconds early</span>
+          </label>
+          <label class="row indent">
+            <span>Resume</span>
+            <input type="number" name="margin.afterSeconds" min="0" max="5" step="0.1" inputmode="decimal">
+            <span>seconds late</span>
+          </label>
+          <button type="button" id="reset">Restore defaults</button>
+        </details>
+      </section>
+    </form>
+
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <footer>
+      <p>Segment data from <a href="https://sponsor.ajay.app" target="_blank" rel="noopener">SponsorBlock</a>, contributed by its community.</p>
+      <p>Skipjack is free software under the GPL-3.0. <a href="https://github.com/CruftCommander/skipjack" target="_blank" rel="noopener">Source code</a></p>
+    </footer>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

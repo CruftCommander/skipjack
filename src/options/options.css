@@ -1,0 +1,76 @@
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --text: #1b1c1e;
+  --muted: #5f6368;
+  --border: #dadce0;
+  --accent: #0b6bcb;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18191b;
+    --surface: #222326;
+    --text: #e8eaed;
+    --muted: #a0a4aa;
+    --border: #3a3c40;
+    --accent: #8ab4f8;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+
+header h1 { margin: 0; font-size: 28px; }
+.tagline { margin: 2px 0 24px; color: var(--muted); }
+
+section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+h2 { margin: 0 0 8px; font-size: 16px; }
+
+.row { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; flex-wrap: wrap; }
+.row > span { display: flex; flex-direction: column; }
+.row.indent { padding-left: 28px; }
+.row.indent > span { display: inline; }
+small { color: var(--muted); font-size: 13px; }
+.hint { margin: 0 0 6px; color: var(--muted); font-size: 13px; }
+
+fieldset { border: 0; margin: 0; padding: 0; }
+fieldset.indent { padding-left: 28px; }
+
+input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+input[type="number"] {
+  width: 76px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+
+details summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 8px; }
+
+button {
+  margin-top: 10px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; cursor: pointer;
+}
+
+#status { min-height: 1.5em; color: var(--muted); font-size: 13px; }
+
+footer { margin-top: 24px; color: var(--muted); font-size: 13px; }
+footer p { margin: 4px 0; }
+a { color: var(--accent); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
