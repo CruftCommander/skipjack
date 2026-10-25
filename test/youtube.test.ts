@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { formatTime } from '../src/core/format';
 import { isDetectRequest, MAX_CUES, MAX_DURATION_SECONDS } from '../src/core/messages';
-import { playerMediaLength, shouldRestoreCaptions, toResult, TRANSCRIPT_MESSAGE_SOURCE, type TranscriptReply, youtubeMediaIdFromUrl } from '../src/platforms/youtube';
+import { captionCandidates, hasProofOfOrigin, playerMediaLength, shouldRestoreCaptions, toResult, TRANSCRIPT_MESSAGE_SOURCE, type TranscriptReply, youtubeMediaIdFromUrl } from '../src/platforms/youtube';
 
 const id = (u: string) => youtubeMediaIdFromUrl(new URL(u));
 
@@ -107,4 +107,24 @@ test('captions are switched back only if they are still where Skipjack left them
   // On before; Skipjack cycled them and left them on: nothing to restore.
   assert.equal(shouldRestoreCaptions({ wasOn: true, leftOn: true, nowOn: true, viewerTouched: false }), false);
   assert.equal(shouldRestoreCaptions({ wasOn: true, leftOn: true, nowOn: false, viewerTouched: false }), false);
+});
+
+test('caption candidates put the player token first, so another script\'s request cannot shadow it', () => {
+  // 2026-10-25: the step 1 probe fetched the player-data URL (no pot) after the player's own request,
+  // and Skipjack took the newest URL, which returned HTTP 200 with no cues on all three attempts.
+  const base = 'https://www.youtube.com/api/timedtext?v=wvA53F5l6vw&lang=en&kind=asr';
+  const player = `${base}&pot=TOKEN&c=WEB`;
+  const probe = base;
+  const other = 'https://www.youtube.com/api/timedtext?v=aIvO29ZH-b4&lang=en&pot=OTHER';
+  assert.equal(hasProofOfOrigin(player), true);
+  assert.equal(hasProofOfOrigin(probe), false);
+  assert.equal(hasProofOfOrigin('not a url'), false);
+  assert.deepEqual(captionCandidates([player, other, probe], 'wvA53F5l6vw'), [player, probe]);
+  // Among token-carrying requests, the newest comes first; duplicates and other videos are dropped.
+  const newer = `${base}&pot=NEWER`;
+  assert.deepEqual(captionCandidates([player, probe, newer, newer, 'garbage'], 'wvA53F5l6vw'), [newer, player, probe]);
+  // With no token anywhere, the newest request is still tried.
+  assert.deepEqual(captionCandidates([probe, `${base}&tlang=de`], 'wvA53F5l6vw'), [`${base}&tlang=de`, probe]);
+  assert.deepEqual(captionCandidates([player, probe, newer], 'wvA53F5l6vw', 1), [newer]);
+  assert.deepEqual(captionCandidates([], 'wvA53F5l6vw'), []);
 });

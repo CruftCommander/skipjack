@@ -6,7 +6,7 @@ They are not part of `npm test` or `npm run check`. Run them before handing over
 
 | Script | What it checks |
 | --- | --- |
-| `detect.mjs` | Detection with a key: no key sends nothing; a past live stream's recording is analyzed and its sponsor skipped with the "(detected)" toast; captions are switched back; content scripts can't read local storage; the second visit is cached; a stream that is live now is not analyzed; the settings page shows the last detection and **Clear detection cache** works. |
+| `detect.mjs` | Detection with a key: no key sends nothing; a past live stream's recording is analyzed and its sponsor skipped with the "(detected)" toast; captions are switched back; a tokenless caption request from another script on the page (as the step 1 probe makes) does not hide the player's; content scripts can't read local storage; the second visit is cached; a stream that is live now is not analyzed; the settings page shows the last detection and **Clear detection cache** works. |
 | `sponsorblock.mjs` | With no key: a SponsorBlock sponsor is skipped and labeled as SponsorBlock's; a channel excluded by handle on the settings page gets no lookup. |
 
 `harness.mjs` holds the shared mock page and routes. `test.webm` is a 2-minute blank video, so seeking works.

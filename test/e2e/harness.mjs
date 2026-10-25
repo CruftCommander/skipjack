@@ -98,6 +98,8 @@ function watchPage(id, details) {
     const on = b.getAttribute('aria-pressed') !== 'true';
     b.setAttribute('aria-pressed', String(on));
     if (on) fetch('/api/timedtext?v=${id}&lang=en&kind=asr&pot=TOKEN&fmt=srv3&r=' + Math.random());
+    // Like the step 1 probe: another script fetches the track without the player's token, just after it.
+    if (on) setTimeout(() => fetch('/api/timedtext?v=${id}&lang=en&kind=asr'), 50);
   });
 </script></body></html>`;
 }
@@ -144,7 +146,8 @@ export async function launch({ videos, sponsorblock = null }) {
     }
     if (url.pathname === '/api/timedtext') {
       calls.captions++;
-      return r.fulfill({ status: 200, headers: { 'content-type': 'application/json' }, body: json3 });
+      // As on YouTube: a caption request without the player's proof-of-origin token gets an empty 200.
+      return r.fulfill({ status: 200, headers: { 'content-type': 'application/json' }, body: url.searchParams.get('pot') ? json3 : '' });
     }
     const id = url.searchParams.get('v');
     if (url.pathname === '/watch' && id && videos[id]) return r.fulfill({ status: 200, headers: { 'content-type': 'text/html' }, body: watchPage(id, videos[id]) });

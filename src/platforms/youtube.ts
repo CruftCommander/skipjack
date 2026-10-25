@@ -72,6 +72,41 @@ export function shouldRestoreCaptions(s: { wasOn: boolean; leftOn: boolean; nowO
   return !s.viewerTouched && s.leftOn !== s.wasOn && s.nowOn === s.leftOn;
 }
 
+/** True when a caption URL carries the proof-of-origin token (`pot`) that only the player adds. */
+export function hasProofOfOrigin(url: string): boolean {
+  try {
+    return Boolean(new URL(url).searchParams.get('pot'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The caption URLs seen on the page that are worth trying for `videoId`, best first: those with the
+ * player's proof-of-origin token, newest first, then any others, newest first. Another script on the
+ * page, such as the step 1 probe, can request the same track without the token, and that request
+ * returns an empty body. `urls` is in the order the requests were seen.
+ */
+export function captionCandidates(urls: readonly string[], videoId: string, limit = 3): string[] {
+  const withToken: string[] = [];
+  const without: string[] = [];
+  const seen = new Set<string>();
+  for (let i = urls.length - 1; i >= 0; i--) {
+    const raw = urls[i];
+    if (!raw || seen.has(raw)) continue;
+    seen.add(raw);
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (url.searchParams.get('v') !== videoId) continue;
+    (hasProofOfOrigin(raw) ? withToken : without).push(raw);
+  }
+  return [...withToken, ...without].slice(0, Math.max(0, limit));
+}
+
 /** Parses YouTube's json3 caption format into [startSeconds, durationSeconds, text] cues. */
 export function parseJson3(body: string): [number, number, string][] {
   let json: { events?: { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string }[] }[] };

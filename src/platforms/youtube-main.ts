@@ -6,6 +6,8 @@
 // reuse the URL the player itself requested, as the step 1 probe did.
 
 import {
+  captionCandidates,
+  hasProofOfOrigin,
   MIN_DETECT_SECONDS,
   parseJson3,
   PLAYER_LENGTH_ATTR,
@@ -125,16 +127,13 @@ try {
   // No resource timing: transcripts are unavailable, and the content script logs why.
 }
 
+/**
+ * The newest caption URL the player itself requested for `videoId`, recognised by its proof-of-origin
+ * token. Requests without it, for example the step 1 probe's, are not counted here; capture() still
+ * tries them last.
+ */
 function observedCaptionUrl(videoId: string): string | null {
-  for (let i = playerCaptionUrls.length - 1; i >= 0; i--) {
-    try {
-      const url = playerCaptionUrls[i];
-      if (url && new URL(url).searchParams.get('v') === videoId) return url;
-    } catch {
-      // Ignore an unparseable entry.
-    }
-  }
-  return null;
+  return captionCandidates(playerCaptionUrls, videoId).find(hasProofOfOrigin) ?? null;
 }
 
 async function waitFor<T>(fn: () => T | null | undefined | false, timeoutMs: number, stepMs = 200): Promise<T | null> {
@@ -354,16 +353,32 @@ async function capture(req: TranscriptRequest): Promise<TranscriptReply> {
   // Without the toggle, wait briefly in case the viewer has captions on.
   if (!url) url = await waitFor(() => observedCaptionUrl(req.videoId), req.allowToggle ? 1000 : 5000);
   if (latest !== req.nonce) return fail('superseded by a newer request', false);
-  if (!url) return fail('the player made no caption request', true);
+  // Best first: the player's own request, then any other caption request seen for this video.
+  const candidates = captionCandidates(playerCaptionUrls, req.videoId);
+  if (candidates.length === 0) return fail('the player made no caption request', true);
 
-  const fetchUrl = new URL(url, location.origin);
-  fetchUrl.searchParams.set('fmt', 'json3');
-  rememberOwnFetch(fetchUrl.href);
-  // A hung request would otherwise hold up every later capture, which waits its turn behind this one.
-  const response = await fetch(fetchUrl.href, { credentials: 'include', signal: AbortSignal.timeout(CAPTION_FETCH_TIMEOUT_MS) });
-  const cues = parseJson3(await response.text());
-  if (cues.length === 0) return fail(`the caption request returned no cues (HTTP ${response.status})`, true);
-  if (latest !== req.nonce) return fail('superseded by a newer request', false);
+  let cues: [number, number, string][] = [];
+  let fetchUrl: URL | null = null;
+  const outcomes: string[] = [];
+  for (const candidate of candidates) {
+    const u = new URL(candidate, location.origin);
+    u.searchParams.set('fmt', 'json3');
+    rememberOwnFetch(u.href);
+    try {
+      // A hung request would otherwise hold up every later capture, which waits its turn behind this one.
+      const response = await fetch(u.href, { credentials: 'include', signal: AbortSignal.timeout(CAPTION_FETCH_TIMEOUT_MS) });
+      cues = parseJson3(await response.text());
+      outcomes.push(`HTTP ${response.status}${hasProofOfOrigin(candidate) ? '' : ' without the player token'}`);
+    } catch (error) {
+      outcomes.push(String(error));
+    }
+    if (latest !== req.nonce) return fail('superseded by a newer request', false);
+    if (cues.length > 0) {
+      fetchUrl = u;
+      break;
+    }
+  }
+  if (!fetchUrl) return fail(`the caption request returned no cues (${outcomes.join('; ')})`, true);
 
   const details = found.videoDetails ?? {};
   const description = text(details.shortDescription);
