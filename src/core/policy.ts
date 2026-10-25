@@ -29,8 +29,12 @@ export type SkipDecision =
 /** A skip that would move playback forward by less than this is not worth a visible seek. */
 export const MIN_SKIP_SECONDS = 0.1;
 
-/** When pausing near the end, never land later than this before the end, so the media does not finish. */
-export const PAUSE_BEFORE_END_SECONDS = 0.25;
+/**
+ * When pausing near the end, never land later than this before the end, so the media does not finish.
+ * Players can treat a paused position close to the end as finished: on YouTube, a pause 0.25 s before
+ * the end still ended the video and autoplay moved on, while 1.5 s held (tested live on 2026-10-25).
+ */
+export const PAUSE_BEFORE_END_SECONDS = 1.5;
 
 /**
  * Filters segments by the settings and applies the margins. Returns windows sorted by start.

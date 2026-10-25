@@ -130,6 +130,17 @@ test('end rule "play" never lets a sponsor play: it skips and pauses instead', (
   assert.deepEqual(d.kind === 'skip' && [d.seekTo, d.pause], [600 - PAUSE_BEFORE_END_SECONDS, true]);
 });
 
+test('the pause point leaves 1.5 s, so the player does not treat the pause as the end', () => {
+  // A smaller margin let YouTube end the video and autoplay the next one (live test, 2026-10-25).
+  assert.equal(PAUSE_BEFORE_END_SECONDS, 1.5);
+  const plan = planSkips([seg('sponsor', 580, 600)], settings());
+  const d = decide(585, 600, plan, none, settings());
+  assert.deepEqual(d.kind === 'skip' && [d.seekTo, d.pause], [598.5, true]);
+  // Inside the last 1.5 s: pause where playback is.
+  const late = decide(598.8, 600, plan, none, settings());
+  assert.deepEqual(late.kind === 'skip' && [late.seekTo, late.pause], [598.8, true]);
+});
+
 test('already past the pause point: pause in place, never seek backward', () => {
   const plan = planSkips([seg('sponsor', 580, 600)], settings());
   const d = decide(599.9, 600, plan, none, settings());
