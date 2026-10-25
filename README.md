@@ -12,8 +12,8 @@ Skipjack is in early development. It skips segments that the [SponsorBlock](http
 | --- | --- | --- |
 | 1. Signal probe | A throwaway extension in [`probe/`](probe/README.md) that measured which signals YouTube exposes | Done |
 | 2. Skeleton | The extension: SponsorBlock lookup, skipping, the skip toast with Undo, and settings | Done |
-| 3. Detection | Transcript analysis with your own LLM provider and key, starting with Anthropic | In progress |
-| 4. Packaging | Store-ready packages for Chromium and Firefox from one release workflow | Not started |
+| 3. Detection | Transcript analysis with your own LLM provider and key, starting with Anthropic | Done |
+| 4. Packaging | Store-ready packages for Chromium and Firefox from one release workflow | In progress |
 
 ## What it skips
 
@@ -77,6 +77,24 @@ Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each vi
 | `npm run check` | Runs the type check, the tests, and the build, in that order |
 | `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an Anthropic API key. See [`eval/README.md`](eval/README.md). |
 | `npm run e2e` | Builds, then checks the extension end to end in Chromium against a mock YouTube page. Needs Playwright. See [`test/e2e/README.md`](test/e2e/README.md). |
+
+### Release
+
+The [release workflow](.github/workflows/release.yml) builds the Chromium and Firefox packages and attaches them to a draft GitHub release.
+
+1. Set `version` in `package.json`. The manifests take the version from there. Use up to four dot-separated numbers, such as `0.2.0`. Browsers don't accept versions such as `0.2.0-beta.1`.
+1. Run `npm run check`, and then commit the change.
+1. Tag the commit with the version and push both:
+
+   ```
+   git tag v0.2.0
+   git push origin main v0.2.0
+   ```
+
+1. Wait for the **Release** workflow to finish. It fails if the tag doesn't match `package.json`.
+1. On GitHub, open the draft release, check the notes and the packages, and then publish it.
+
+Each release carries `skipjack-<version>-chromium.zip` for Edge and Chrome, `skipjack-<version>-firefox.zip` for Firefox, and `SHA256SUMS.txt`. To build the packages without a release, run the workflow from the **Actions** tab. The packages are attached to that run as an artifact.
 
 ### Layout
 

@@ -1,0 +1,106 @@
+# Builds the Chromium and Firefox packages and attaches them to a draft GitHub release.
+#
+# To release: set "version" in package.json (the manifests take it from there), commit, then push a
+# tag named after it, for example v0.2.0. The workflow refuses a tag that does not match. The release
+# is created as a draft; review it on GitHub and publish it by hand. Browsers accept only up to four
+# dot-separated numbers as an extension version, so there are no "-beta" style versions.
+#
+# To build the packages without releasing, run the workflow by hand from the Actions tab. The
+# packages are then attached to the run as an artifact.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the release; nothing else
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]]; then
+            echo "::error::package.json version $version is not a valid extension version: use up to four dot-separated numbers."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version $version"
+
+      - name: Check the tag matches package.json
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG does not match package.json version $VERSION. Expected v$VERSION."
+            exit 1
+          fi
+
+      # Install scripts are skipped: nothing Skipjack depends on needs one, and the job holds a
+      # token that can write releases.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Type check, test, and build
+        run: npm run check
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir release
+          for target in chromium firefox; do
+            # The manifest must sit at the root of the zip, so zip from inside the folder.
+            (cd "dist/$target" && zip -r -X -q "../../release/skipjack-$VERSION-$target.zip" .)
+          done
+          (cd release && sha256sum -- *.zip > SHA256SUMS.txt)
+          unzip -l "release/skipjack-$VERSION-chromium.zip"
+          cat release/SHA256SUMS.txt
+
+      - name: Attach the packages to this run
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skipjack-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create the draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --title "Skipjack $VERSION" \
+            --generate-notes
