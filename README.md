@@ -85,8 +85,9 @@ Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each vi
 | `npm test` | Runs the unit tests with Node's built-in test runner |
 | `npm run check` | Runs the type check, the tests, and the build, in that order |
 | `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an API key for each provider whose models it runs. See [`eval/README.md`](eval/README.md). |
-| `npm run icons` | Renders `src/icons/icon.svg` to the PNGs the manifests use. Run it after changing the SVG. Needs Playwright, as `npm run e2e` does. |
-| `npm run e2e` | Builds, then checks the extension end to end in Chromium against a mock YouTube page. Needs Playwright. See [`test/e2e/README.md`](test/e2e/README.md). |
+| `npm run icons` | Renders `src/icons/icon.svg` to the PNGs the manifests use. Run it after changing the SVG. Needs Playwright (`npm install --no-save playwright@1.56.0` and `npx playwright install chromium`). |
+| `npm run e2e` | Builds, then checks the extension end to end against a mock YouTube page in the first Chromium browser it finds: Edge, Chrome, or Playwright's Chromium. No library needed. See [`test/e2e/README.md`](test/e2e/README.md). |
+| `npm run e2e:edge`, `npm run e2e:chrome` | The same checks in that browser specifically. |
 | `npm run e2e:firefox` | The same checks in Firefox, as a temporary add-on. Needs Firefox and geckodriver. |
 
 ### Release
@@ -128,7 +129,7 @@ The rest:
 - `src/detect` holds the detection prompt and the clean-up of model output, shared by every LLM provider.
 - `src/ui` holds the skip toast. `src/options` holds the settings page, and `src/popup` the toolbar popup.
 - `eval` scores detection against hand-verified boundaries. It is a development tool and is not part of the extension.
-- `test/e2e` drives the built extension in Chromium and Firefox against a mock YouTube page. Like `eval`, it is a development tool.
+- `test/e2e` drives the built extension in Edge, Chrome, or Chromium, and in Firefox, against a mock YouTube page. Like `eval`, it is a development tool.
 - `scripts/build.mjs` generates each target's manifest and bundles the scripts.
 
 ## Privacy

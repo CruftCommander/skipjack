@@ -1,7 +1,7 @@
 // The mock YouTube site and APIs the end-to-end checks run against, shared by both browser back ends.
-// Nothing here reaches the real sites: the watch page, the caption endpoint, SponsorBlock, the Anthropic API,
-// and the OpenAI API are all answered here. The Chromium back end serves these answers through Playwright's
-// request routing; the Firefox back end serves them from a local TLS proxy. See README.md in this folder.
+// Nothing here reaches the real sites: the watch page, the caption endpoint, SponsorBlock, the Anthropic
+// API, and the OpenAI API are all answered here, served to the browser by the local proxy in proxy.mjs.
+// See README.md in this folder.
 
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';

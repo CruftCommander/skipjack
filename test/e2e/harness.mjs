@@ -1,8 +1,8 @@
-// Shared harness for the end-to-end checks. Picks the browser (Chromium through Playwright, or Firefox
-// through geckodriver with `--firefox`), starts it with the built extension and the mock YouTube site
-// from mock.mjs, and gives the check scripts one browser-neutral interface:
+// Shared harness for the end-to-end checks. Picks the browser (Edge, Chrome, or a Chromium build over
+// CDP; Firefox through geckodriver with `--firefox`), starts it with the built extension and the mock
+// YouTube site from mock.mjs, and gives the check scripts one browser-neutral interface:
 //
-//   browser                     'chromium' or 'firefox'
+//   browser                     'edge', 'chrome', 'chromium', or 'firefox'
 //   calls                       request counts per mocked API: anthropic, openai, sponsorblock, captions
 //   open(id)                    opens a mock watch page: { page, logs } with the page's [Skipjack] console lines
 //   openSettings()              opens the extension's settings page
@@ -12,7 +12,7 @@
 //   finish()                    closes the browser, prints the tally, returns the exit code
 //
 // A page has evaluate(fn, arg), text(selector), allText() (including shadow roots, where the toast
-// lives), click(selector), fill(selector, value), close(), and on Chromium contentScriptStorage().
+// lives), click(selector), fill(selector, value), close(), and on Chromium browsers contentScriptStorage().
 // Nothing here reaches the real sites. See README.md in this folder.
 
 import { dirname, resolve } from 'node:path';
@@ -33,9 +33,13 @@ export async function waitFor(fn, ms = 20000) {
   return null;
 }
 
-/** `--firefox` on the command line, or SKIPJACK_E2E_BROWSER=firefox, picks Firefox; Chromium otherwise. */
+/**
+ * The browser: `--firefox`, `--edge`, or `--chrome` on the command line (or SKIPJACK_E2E_BROWSER);
+ * otherwise 'chromium', which runs the first found of Edge, Chrome, and Playwright's Chromium.
+ */
 export function chosenBrowser() {
-  return process.argv.includes('--firefox') || process.env.SKIPJACK_E2E_BROWSER === 'firefox' ? 'firefox' : 'chromium';
+  for (const b of ['firefox', 'edge', 'chrome']) if (process.argv.includes(`--${b}`) || process.env.SKIPJACK_E2E_BROWSER === b) return b;
+  return 'chromium';
 }
 
 /**
@@ -44,11 +48,12 @@ export function chosenBrowser() {
  * null for "no segments" (404) or a list of { videoID, segments } entries to answer every lookup with.
  */
 export async function launch({ videos, sponsorblock = null }) {
-  const browser = chosenBrowser();
+  const want = chosenBrowser();
   const backend =
-    browser === 'firefox'
+    want === 'firefox'
       ? await (await import('./browser-firefox.mjs')).launchFirefox({ repo, videos, sponsorblock })
-      : await (await import('./browser-chromium.mjs')).launchChromium({ repo, videos, sponsorblock });
+      : await (await import('./browser-chromium.mjs')).launchChromium({ repo, want, videos, sponsorblock });
+  const { browser } = backend;
   console.log(`[${browser}]`);
 
   const results = [];

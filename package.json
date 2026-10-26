@@ -13,6 +13,8 @@
     "check": "npm run typecheck && npm test && npm run build",
     "eval": "node scripts/eval.mjs",
     "e2e": "npm run build && node test/e2e/detect.mjs && node test/e2e/sponsorblock.mjs",
+    "e2e:edge": "npm run build && node test/e2e/detect.mjs --edge && node test/e2e/sponsorblock.mjs --edge",
+    "e2e:chrome": "npm run build && node test/e2e/detect.mjs --chrome && node test/e2e/sponsorblock.mjs --chrome",
     "e2e:firefox": "npm run build && node test/e2e/detect.mjs --firefox && node test/e2e/sponsorblock.mjs --firefox",
     "icons": "node scripts/icons.mjs"
   },

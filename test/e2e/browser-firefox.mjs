@@ -1,24 +1,21 @@
 // Firefox back end for the end-to-end checks: a real Firefox driven through geckodriver (WebDriver
 // over HTTP, plus a BiDi WebSocket for console messages; no client library), with dist/firefox
-// installed as a temporary add-on. Firefox cannot
-// route requests the way Playwright does, so every request goes through a local proxy that answers
-// HTTPS itself with a throwaway certificate and the mock site's responses. The session accepts any
-// certificate, so the certificate only has to exist. Exposes the browser-neutral interface described
-// in harness.mjs.
+// installed as a temporary add-on. Every request goes through the local proxy from proxy.mjs, which
+// answers HTTPS itself with a throwaway certificate and the mock site's responses; the session
+// accepts any certificate, so the certificate only has to exist. Exposes the browser-neutral
+// interface described in harness.mjs.
 //
-// Needs Firefox 140 or later, geckodriver 0.36 or later (for --allow-system-access), and openssl.
-// FIREFOX, GECKODRIVER, and OPENSSL name the binaries when they are not on PATH or in the default
-// places below.
+// Needs Firefox 140 or later, geckodriver 0.36 or later (for --allow-system-access), and openssl
+// (see proxy.mjs). FIREFOX and GECKODRIVER name the binaries when they are not in the default places
+// below or on PATH.
 
-import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import http from 'node:http';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import net from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import tls from 'node:tls';
-import { promisify } from 'node:util';
 import { createMockSite } from './mock.mjs';
+import { makeCertificate, startProxy } from './proxy.mjs';
 
 const win = process.platform === 'win32';
 const cache = join(homedir(), '.cache', 'skipjack-e2e');
@@ -58,55 +55,6 @@ const findGeckodriver = (repo) => {
   const file = win ? 'geckodriver.exe' : 'geckodriver';
   return findBinary('geckodriver', 'GECKODRIVER', [join(cache, file), join(repo, '.cache', file)]);
 };
-const findOpenssl = () => findBinary('openssl', 'OPENSSL', ['C:\\Program Files\\Git\\usr\\bin\\openssl.exe', 'C:\\Program Files\\Git\\mingw64\\bin\\openssl.exe']);
-
-/** A throwaway self-signed certificate for the mock hosts, valid for two days. */
-async function makeCertificate(dir) {
-  const openssl = await findOpenssl();
-  const key = join(dir, 'key.pem');
-  const cert = join(dir, 'cert.pem');
-  const hosts = ['www.youtube.com', 'm.youtube.com', 'sponsor.ajay.app', 'api.anthropic.com', 'api.openai.com'];
-  await promisify(execFile)(openssl, [
-    'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
-    '-keyout', key, '-out', cert, '-days', '2', '-subj', '/CN=Skipjack e2e',
-    '-addext', `subjectAltName=${hosts.map((h) => `DNS:${h}`).join(',')}`,
-  ]);
-  return { key: await readFile(key), cert: await readFile(cert) };
-}
-
-/**
- * An HTTP proxy that terminates every CONNECT tunnel itself and answers from the mock site. Plain
- * HTTP requests get a 404. Returns the port.
- */
-async function startProxy(site, { key, cert }) {
-  const secureContext = tls.createSecureContext({ key, cert });
-  const app = http.createServer((req, res) => {
-    const { status, headers, body } = site.respond(`https://${req.headers.host}${req.url}`, req.headers.range ?? '');
-    res.writeHead(status, { ...headers, 'content-length': Buffer.byteLength(body) });
-    res.end(body);
-  });
-  const proxy = http.createServer((req, res) => {
-    res.writeHead(404);
-    res.end();
-  });
-  proxy.on('connect', (req, socket, head) => {
-    socket.on('error', () => undefined);
-    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    const secure = new tls.TLSSocket(socket, { isServer: true, secureContext });
-    secure.on('error', () => undefined);
-    if (head?.length) secure.unshift(head);
-    app.emit('connection', secure);
-  });
-  await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
-  return {
-    port: proxy.address().port,
-    close: () => {
-      app.closeAllConnections();
-      proxy.closeAllConnections();
-      return Promise.all([new Promise((r) => app.close(() => r())), new Promise((r) => proxy.close(() => r()))]);
-    },
-  };
-}
 
 async function freePort() {
   return new Promise((resolve, reject) => {
