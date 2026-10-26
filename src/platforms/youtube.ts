@@ -3,6 +3,7 @@
 import { normalizeHandle, type ChannelRef } from '../core/channels';
 import { MAX_CHAPTERS, MAX_CUES, MAX_DURATION_SECONDS, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../core/messages';
 import { MIN_DETECTION_SECONDS } from '../core/sources';
+import type { MediaChapter } from '../core/types';
 import type { ChannelSyntax, PlatformAdapter, TranscriptResult } from './platform';
 
 export const YOUTUBE_ID = 'youtube';
@@ -21,6 +22,32 @@ export const TRANSCRIPT_REQUEST_EVENT = 'skipjack:yt-transcript-request';
 export const TRANSCRIPT_REQUEST_ATTR = 'data-skipjack-transcript-request';
 /** The page-world script answers with window.postMessage, tagged with this source. */
 export const TRANSCRIPT_MESSAGE_SOURCE = 'skipjack-yt-transcript';
+/** Chapter requests work the same way, with their own event, attribute, and message source. */
+export const CHAPTERS_REQUEST_EVENT = 'skipjack:yt-chapters-request';
+export const CHAPTERS_REQUEST_ATTR = 'data-skipjack-chapters-request';
+export const CHAPTERS_MESSAGE_SOURCE = 'skipjack-yt-chapters';
+
+export interface ChaptersRequest {
+  nonce: string;
+  videoId: string;
+}
+
+/**
+ * What youtube-main.ts posts back. `byCreator` is true for chapters from the creator's description
+ * (YouTube's DESCRIPTION_CHAPTERS markers) and false for YouTube's generated AUTO_CHAPTERS.
+ */
+export type ChaptersReply =
+  | { source: typeof CHAPTERS_MESSAGE_SOURCE; nonce: string; ok: true; videoId: string; chapters: MediaChapter[] }
+  | { source: typeof CHAPTERS_MESSAGE_SOURCE; nonce: string; ok: false; videoId: string };
+
+/** Validates the page-world script's chapter reply. Null when it has none or is malformed. */
+export function toChapters(r: ChaptersReply, mediaId: string): MediaChapter[] | null {
+  if (!r.ok || r.videoId !== mediaId || !Array.isArray(r.chapters)) return null;
+  return r.chapters
+    .slice(0, MAX_CHAPTERS)
+    .map((c) => ({ title: String(c?.title ?? '').slice(0, 200), start: Number(c?.start), byCreator: c?.byCreator === true }))
+    .filter((c) => Number.isFinite(c.start) && c.start >= 0 && c.start <= MAX_DURATION_SECONDS);
+}
 
 export interface TranscriptRequest {
   nonce: string;
@@ -136,6 +163,8 @@ const HANDLE = /^@?([\p{L}\p{M}\p{N}._\-\u00B7]{3,30})$/u;
 const POLL_MS = 1000;
 /** Longest wait for the page-world script's answer: it may wait out an ad of up to 90 s. */
 const TRANSCRIPT_TIMEOUT_MS = 120_000;
+/** Longest wait for a chapter answer. The page script itself gives up after 10 s. */
+const CHAPTERS_TIMEOUT_MS = 15_000;
 /**
  * Limits on what the page may hand over. The page writes the transcript, so these bound what a
  * misbehaving page could make detection spend. 400,000 characters is about 7 hours of speech.
@@ -340,6 +369,31 @@ export function createYouTubeAdapter(doc: Document = document, win: Window = win
       if (player.video !== mediaId || player.length === null) return null;
       const n = Number(player.length);
       return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+    },
+
+    readChapters(mediaId): Promise<MediaChapter[] | null> {
+      const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      return new Promise((resolve) => {
+        const done = (result: MediaChapter[] | null): void => {
+          win.removeEventListener('message', onMessage);
+          win.clearTimeout(timer);
+          resolve(result);
+        };
+        const onMessage = (event: MessageEvent): void => {
+          const d = event.data as Partial<ChaptersReply> | null;
+          if (event.source !== win || !d || d.source !== CHAPTERS_MESSAGE_SOURCE || d.nonce !== nonce) return;
+          try {
+            done(toChapters(d as ChaptersReply, mediaId));
+          } catch {
+            done(null);
+          }
+        };
+        const timer = win.setTimeout(() => done(null), CHAPTERS_TIMEOUT_MS);
+        win.addEventListener('message', onMessage);
+        const request: ChaptersRequest = { nonce, videoId: mediaId };
+        doc.documentElement.setAttribute(CHAPTERS_REQUEST_ATTR, JSON.stringify(request));
+        doc.dispatchEvent(new CustomEvent(CHAPTERS_REQUEST_EVENT));
+      });
     },
 
     cancelTranscript() {

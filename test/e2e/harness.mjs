@@ -74,7 +74,27 @@ const anthropicBody = sse([
  * A watch page whose #movie_player answers getVideoData() and getPlayerResponse() like YouTube's,
  * with a captions button that, like the real player, requests the track with a token when switched on.
  */
-function watchPage(id, details) {
+function watchPage(id, { chapters, ...details }) {
+  // Chapter sets as YouTube's page data lists them: { DESCRIPTION_CHAPTERS: [[title, startSeconds]], AUTO_CHAPTERS: [...] }.
+  const initialData = {
+    currentVideoEndpoint: { watchEndpoint: { videoId: id } },
+    playerOverlays: {
+      playerOverlayRenderer: {
+        decoratedPlayerBarRenderer: {
+          decoratedPlayerBarRenderer: {
+            playerBar: {
+              multiMarkersPlayerBarRenderer: {
+                markersMap: Object.entries(chapters ?? {}).map(([key, list]) => ({
+                  key,
+                  value: { chapters: list.map(([title, start]) => ({ chapterRenderer: { title: { simpleText: title }, timeRangeStartMillis: start * 1000 } })) },
+                })),
+              },
+            },
+          },
+        },
+      },
+    },
+  };
   const response = {
     videoDetails: { videoId: id, channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', author: 'Mock Channel', title: `Mock ${id}`, shortDescription: 'Use code SKIP', ...details },
     microformat: { playerMicroformatRenderer: { ownerProfileUrl: 'http://www.youtube.com/@mockchannel' } },
@@ -89,6 +109,7 @@ function watchPage(id, details) {
 <script>
   const p = document.getElementById('movie_player');
   const response = ${JSON.stringify(response)};
+  window.ytInitialData = ${JSON.stringify(initialData)};
   p.getVideoData = () => ({ video_id: ${JSON.stringify(id)}, author: 'Mock Channel' });
   p.getPlayerResponse = () => response;
   const b = p.querySelector('.ytp-subtitles-button');
@@ -106,7 +127,7 @@ function watchPage(id, details) {
 
 /**
  * Starts Chromium with the extension. `videos` maps 11-character video IDs to videoDetails fields
- * (lengthSeconds, isLive, isLiveContent). `sponsorblock` is null for "no segments" (404) or a list
+ * (lengthSeconds, isLive, isLiveContent), plus optional `chapters` for the page data. `sponsorblock` is null for "no segments" (404) or a list
  * of { videoID, segments } entries to answer every lookup with.
  */
 export async function launch({ videos, sponsorblock = null }) {

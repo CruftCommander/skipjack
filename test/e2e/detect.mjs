@@ -4,7 +4,7 @@
 // Checks: with no key nothing is toggled or sent; a past live stream's recording (isLiveContent
 // true, isLive false) is analyzed and its sponsor skipped with the "(detected)" toast; captions are
 // switched back; content scripts cannot read local storage; the second visit is cached; a stream
-// that is live now is not analyzed; the settings page shows the last detection, and Clear detection
+// that is live now is not analyzed and the log says why; the settings page shows the last detection, and Clear detection
 // cache removes results and status but keeps the key; after clearing, the video is analyzed again.
 
 import { launch } from './harness.mjs';
@@ -80,6 +80,7 @@ try {
     await sleep(6000);
     check('live now: no detection', calls.anthropic === before, logs.join(' | '));
     check('live now: captions never toggled', (await toggles(page)) === 0);
+    check('live now: logs why', logs.some((l) => l.includes('no transcript detection: live streams are not analyzed')), logs.join(' | '));
     await page.close();
   }
 

@@ -25,6 +25,14 @@ You choose the categories on the settings page. All three are on by default.
 | Interaction reminder | Requests to like, subscribe, or turn on notifications. A request for comments on its own, such as "let me know your thoughts in the comments", is left to play. |
 | Self-promotion | Merch, memberships, Patreon, and the creator's other channels |
 
+Skipjack finds segments in three places, and the earlier one wins for each category:
+
+1. Segments the SponsorBlock community has marked.
+1. A chapter the creator titled as a sponsor read, such as "Sponsor", "Sponsored by…", or "Ad break". It runs to the next chapter, up to 10 minutes. Chapters YouTube generates itself don't count. This needs no API key.
+1. With your API key, detection from the video's captions.
+
+The skip message says "(chapter)" or "(detected)" for the last two.
+
 Skipjack is built to skip a little extra rather than show any part of a pitch. By default it starts each skip half a second early and resumes half a second late. You can change both on the settings page, under **Advanced**.
 
 Other behavior you can change on the settings page:
@@ -95,7 +103,9 @@ The [release workflow](.github/workflows/release.yml) builds the Chromium and Fi
 1. Wait for the **Release** workflow to finish. It fails if the tag doesn't match `package.json`.
 1. On GitHub, open the draft release, check the notes and the packages, and then publish it.
 
-Each release carries `skipjack-<version>-chromium.zip` for Edge and Chrome, `skipjack-<version>-firefox.zip` for Firefox, and `SHA256SUMS.txt`. To build the packages without a release, run the workflow from the **Actions** tab. The packages are attached to that run as an artifact.
+Each release carries `skipjack-<version>-chromium.zip` for Edge and Chrome, `skipjack-<version>-firefox.zip` for Firefox, and `SHA256SUMS.txt`. Every run checks the Firefox build with Mozilla's `web-ext lint`.
+
+A tagged release also carries `skipjack-<version>-firefox.xpi`, signed by addons.mozilla.org as an unlisted add-on, which installs permanently in Firefox. Signing needs an API key from [addons.mozilla.org](https://addons.mozilla.org/developers/addon/api/key/), stored as two repository secrets, `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. Without them the release is made without the `.xpi`. Mozilla signs each version only once, so a version that failed after signing needs a new version number. To build the packages without a release, run the workflow from the **Actions** tab. The packages are attached to that run as an artifact.
 
 ### Layout
 
@@ -126,13 +136,15 @@ Skipjack has no server of its own. It sends two kinds of request:
 - **A segment lookup to SponsorBlock.** The request carries the first 4 characters of the SHA-256 hash of the video ID, not the ID itself, so SponsorBlock cannot tell which video you are watching.
 - **Detection requests to Anthropic, only if you add an API key.** For each video analyzed, Skipjack sends the video's captions, title, chapter titles, whether it is marked as paid promotion, and any description lines that look promotional, using your key. Anthropic's terms for your account apply to that data.
 
+When you install Skipjack in Firefox, Firefox lists website content as data it collects. That refers to the captions sent to Anthropic for detection, which happens only after you add a key.
+
 Your settings and excluded channels are stored in your browser's synced extension storage. Your API key and the detection results stay in local extension storage on this computer and never sync. Web pages can't read local extension storage. In Edge and Chrome, Skipjack also hides it from its own scripts that run on YouTube, so only its settings page and background script can read your key. Firefox has no way to do that, so there Skipjack's script on YouTube pages could read it if the page's renderer were compromised.
 
 Skipjack does keep a record of the videos it analyzes, on this computer only. Each saved detection result is stored under the video's ID for up to 60 days, and the settings page shows the most recent one. To delete them, select **Clear detection cache** on the settings page, under **Detection**. Removing Skipjack deletes them too.
 
 ## Attribution
 
-Segment data comes from [SponsorBlock](https://sponsor.ajay.app) and its contributors. SponsorBlock's database and API are licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). Skipjack is not affiliated with SponsorBlock.
+Uses SponsorBlock data licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) from <https://sponsor.ajay.app/>. The segments come from SponsorBlock's contributors. Skipjack is not affiliated with SponsorBlock.
 
 ## License
 

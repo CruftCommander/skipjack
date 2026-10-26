@@ -7,6 +7,11 @@
 #
 # To build the packages without releasing, run the workflow by hand from the Actions tab. The
 # packages are then attached to the run as an artifact.
+#
+# Firefox: every run checks the Firefox build with Mozilla's web-ext lint. A tagged release is also
+# signed by addons.mozilla.org as an unlisted add-on, so it installs permanently in Firefox. That
+# needs two repository secrets from an AMO API key (addons.mozilla.org/developers/addon/api/key/):
+# AMO_JWT_ISSUER and AMO_JWT_SECRET. Without them the release is made with the unsigned zip only.
 
 name: Release
 
@@ -78,8 +83,45 @@ jobs:
             # The manifest must sit at the root of the zip, so zip from inside the folder.
             (cd "dist/$target" && zip -r -X -q "../../release/skipjack-$VERSION-$target.zip" .)
           done
-          (cd release && sha256sum -- *.zip > SHA256SUMS.txt)
           unzip -l "release/skipjack-$VERSION-chromium.zip"
+
+      # web-ext is fetched by exact version, with install scripts off, as for the dependencies.
+      - name: Lint the Firefox build
+        env:
+          npm_config_ignore_scripts: 'true'
+        run: npx --yes web-ext@10.7.0 lint --source-dir dist/firefox
+
+      # Unlisted: Mozilla signs it after an automated review, and it is not listed in the store.
+      # The bundled scripts are generated, so the source code is uploaded with it, as AMO asks.
+      - name: Sign the Firefox package
+        if: github.ref_type == 'tag'
+        env:
+          npm_config_ignore_scripts: 'true'
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "::warning::AMO_JWT_ISSUER and AMO_JWT_SECRET are not set, so the Firefox package is not signed."
+            exit 0
+          fi
+          git archive --format=zip --output=source.zip HEAD
+          npx --yes web-ext@10.7.0 sign \
+            --channel unlisted \
+            --source-dir dist/firefox \
+            --artifacts-dir signed \
+            --upload-source-code source.zip \
+            --approval-timeout 900000
+          xpi=$(find signed -name '*.xpi' | head -n 1)
+          if [ -z "$xpi" ]; then
+            echo "::error::web-ext sign finished without a signed .xpi."
+            exit 1
+          fi
+          mv "$xpi" "release/skipjack-$VERSION-firefox.xpi"
+
+      - name: Checksums
+        run: |
+          (cd release && sha256sum -- * > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
       - name: Attach the packages to this run

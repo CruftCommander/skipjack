@@ -17,7 +17,8 @@ import type {
 import { planSkips } from '../core/policy';
 import type { Settings } from '../core/settings';
 import { SkipController, type SkipEvent } from '../core/skipper';
-import { DETECTION_SOURCE, mergeSources, shouldDetect } from '../core/sources';
+import { sponsorChapterSegments } from '../core/chapters';
+import { CHAPTER_SOURCE, DETECTION_SOURCE, detectionSkipReason, mergeSources, settingsSkipReason } from '../core/sources';
 import { CATEGORY_LABELS, type Category, type MediaRef, type Segment } from '../core/types';
 import type { PlatformAdapter } from '../platforms/platform';
 import type { Toast } from '../ui/toast';
@@ -174,7 +175,7 @@ export class Session {
       log.warn(`segment lookup failed for ${this.media.id}: ${error}${delay ? `; retrying in ${delay / 1000} s` : ''}`);
       if (delay) this.retry = setTimeout(() => void this.lookup(attempt + 1), delay);
       // SponsorBlock is unreachable: detection can still cover the video on its own.
-      else void this.detect().catch((e: unknown) => log.warn(`detection failed for ${this.media.id}: ${String(e)}`));
+      else void this.afterLookup();
       return;
     }
     this.community = response.segments;
@@ -185,7 +186,38 @@ export class Session {
         `${plan.length} to skip with current settings`,
     );
     if (this.segments.length > 0) this.startAttaching();
-    void this.detect().catch((error: unknown) => log.warn(`detection failed for ${this.media.id}: ${String(error)}`));
+    void this.afterLookup();
+  }
+
+  /** Sponsor chapters first, so detection isn't paid for a sponsor the creator already marked. */
+  private async afterLookup(): Promise<void> {
+    try {
+      await this.applyChapters();
+    } catch (error) {
+      log.warn(`reading chapters failed for ${this.media.id}: ${String(error)}`);
+    }
+    await this.detect().catch((error: unknown) => log.warn(`detection failed for ${this.media.id}: ${String(error)}`));
+  }
+
+  /**
+   * Adds a sponsor segment for each chapter the creator titled as a sponsor read. Needs no API key.
+   * SponsorBlock wins: when it has a sponsor segment, chapters are not read at all.
+   */
+  private async applyChapters(): Promise<void> {
+    if (!this.adapter.readChapters || this.destroyed || this.isExcluded()) return;
+    if (!this.settings.enabled || !this.settings.categories.sponsor) return;
+    if (this.community.some((s) => s.category === 'sponsor')) return;
+    const chapters = await this.adapter.readChapters(this.media.id);
+    if (!chapters || this.destroyed) return;
+    const found = sponsorChapterSegments(chapters, await this.waitForLength());
+    if (found.length === 0 || this.destroyed || this.isExcluded()) return;
+    // Treated like community data from here on: detection fills only what is still missing.
+    this.community = mergeSources(this.community, found);
+    // Detection runs after this, so nothing detected is here yet.
+    this.segments = this.community;
+    log.info(`${this.media.id}: ${found.length} sponsor segment(s) from the creator's chapter titles`);
+    this.startAttaching();
+    this.controller?.update(planSkips(this.segments, this.settings), this.settings);
   }
 
   private startAttaching(): void {
@@ -219,12 +251,19 @@ export class Session {
    * the cache and the API key before touching the captions.
    */
   private async detect(): Promise<void> {
-    if (!this.adapter.readTranscript || !this.detectionAllowed()) return;
+    // Each reason detection does not run is logged once, so a skipped video can be told apart
+    // from a missed one. An excluded channel is logged where it is held back.
+    if (this.destroyed || this.isExcluded()) return;
+    if (!this.adapter.readTranscript) return this.skipDetection("transcripts can't be read on this site");
+    const early = settingsSkipReason(this.settings.detection.mode, this.settings);
+    if (early) return this.skipDetection(early);
 
     // The length comes from the platform's data for this media: the media element may be playing
     // an ad, or still hold the previous video.
     const length = await this.waitForLength();
-    if (!this.detectionAllowed() || !shouldDetect(this.settings.detection.mode, this.community, this.settings, length)) return;
+    if (!this.detectionAllowed()) return;
+    const reason = detectionSkipReason(this.settings.detection.mode, this.community, this.settings, length);
+    if (reason) return this.skipDetection(reason);
     const element = await this.waitForElement();
     if (!element || !this.detectionAllowed()) return;
 
@@ -266,6 +305,10 @@ export class Session {
       // video has played a while rather than after a fixed delay.
       await this.waitForPlayback(element, TRANSCRIPT_RETRY_PLAY_MS);
     }
+  }
+
+  private skipDetection(reason: string): void {
+    log.info(`${this.media.id}: no transcript detection: ${reason}`);
   }
 
   private async waitForLength(timeoutMs = 15000): Promise<number> {
@@ -334,12 +377,13 @@ export class Session {
     this.lastSkip = event;
     const categories = event.run.windows.map((w) => w.segment.category);
     const detected = event.run.windows.some((w) => w.segment.source === DETECTION_SOURCE);
+    const fromChapter = event.run.windows.some((w) => w.segment.source === CHAPTER_SOURCE);
     log.info(
       `skipped ${categories.join(' + ')} ${formatTime(event.fromTime)} -> ${formatTime(event.toTime)}` +
         (event.paused ? ' and paused' : ''),
     );
     if (!this.settings.toast.enabled) return;
-    const label = describe(categories) + (detected ? ' (detected)' : '');
+    const label = describe(categories) + (detected ? ' (detected)' : fromChapter ? ' (chapter)' : '');
     const message = event.paused
       ? `Skipped ${label} and paused`
       : `Skipped ${label} (${formatTime(event.toTime - event.fromTime)})`;

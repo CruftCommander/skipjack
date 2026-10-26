@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { cacheKey, DetectionService, HOURLY_LIMIT } from '../src/background/detection';
 import { DETECTION_STATUS_KEY, detectionCacheKeys, isDetectRequest, MAX_CHAPTERS, MAX_PROMO_LINES, MAX_TRANSCRIPT_CHARS } from '../src/core/messages';
 import { normalizeSettings } from '../src/core/settings';
-import { DETECTION_SOURCE, mergeSources, missingCategories, shouldDetect } from '../src/core/sources';
+import { DETECTION_SOURCE, detectionSkipReason, mergeSources, missingCategories, shouldDetect } from '../src/core/sources';
 import { SpentError, type DetectionInput, type LlmProvider } from '../src/llm/provider';
 import { parseJson3 } from '../src/platforms/youtube';
 import { fakeShell, seg } from './helpers';
@@ -40,6 +40,22 @@ test('shouldDetect follows the mode, the enabled categories, and the duration', 
   // With reminders and self-promotion switched off, a sponsor-only result covers everything wanted.
   const sponsorsOnly = normalizeSettings({ categories: { selfpromo: false, interaction: false } });
   assert.deepEqual(missingCategories(sponsorOnly, sponsorsOnly), []);
+});
+
+test('detectionSkipReason names why detection does not run, and null when it should', () => {
+  const s = normalizeSettings(undefined);
+  const reason = detectionSkipReason;
+  const all = [seg('sponsor', 1, 9), seg('selfpromo', 20, 30), seg('interaction', 40, 50)];
+  assert.equal(reason('fillGaps', [], s, 600), null);
+  assert.equal(reason('fillGaps', [], normalizeSettings({ enabled: false }), 600), 'Skipjack is switched off');
+  assert.equal(reason('off', [], s, 600), 'detection is off in settings');
+  const none = normalizeSettings({ categories: { sponsor: false, selfpromo: false, interaction: false } });
+  assert.equal(reason('fillGaps', [], none, 600), 'every category is switched off');
+  assert.equal(reason('fillGaps', [], s, Number.POSITIVE_INFINITY), 'live streams are not analyzed');
+  assert.equal(reason('fillGaps', [], s, Number.NaN), "the video's length isn't known");
+  assert.equal(reason('fillGaps', [], s, 45), 'shorter than 60 seconds');
+  assert.match(reason('noCommunity', [seg('sponsor', 10, 40)], s, 600) ?? '', /only when it has none/);
+  assert.equal(reason('fillGaps', all, s, 600), 'SponsorBlock covers every enabled category');
 });
 
 test('mergeSources lets the community win for any category it has', () => {

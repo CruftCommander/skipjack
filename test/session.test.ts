@@ -146,3 +146,41 @@ test('a detection that returns after the user switched detection off is not appl
     on.session.destroy();
   }
 });
+
+test('a creator sponsor chapter is skipped with no key, and detection is not asked for what it covers', async () => {
+  const shell = fakeShell();
+  const sent: string[] = [];
+  shell.sendMessage = (async (m: { type: string }) => {
+    sent.push(m.type);
+    return m.type === 'getSegments' ? { ok: true, segments: [], sources: ['test'] } : { ok: true, cached: null, keySet: false };
+  }) as typeof shell.sendMessage;
+  let chapterReads = 0;
+  const media = new FakeMedia();
+  const adapter = {
+    id: 'youtube',
+    channelOf: () => null,
+    findMediaElement: () => media,
+    canSkipNow: () => true,
+    lengthOf: () => 600,
+    readChapters: async () => {
+      chapterReads++;
+      return [
+        { title: 'Intro', start: 0, byCreator: true },
+        { title: 'Sponsor', start: 60, byCreator: true },
+        { title: 'Main', start: 120, byCreator: true },
+      ];
+    },
+  } as unknown as PlatformAdapter;
+  const sponsorOnly = normalizeSettings({ categories: { selfpromo: false, interaction: false } });
+  const session = new Session({ platform: 'youtube', id: 'abcdefghijk' }, adapter, shell, new ChannelStore(shell), sponsorOnly, [], toast);
+  try {
+    await sleep(300);
+    assert.equal(chapterReads, 1);
+    const segments = (session as unknown as { segments: { source: string; start: number; end: number }[] }).segments;
+    assert.deepEqual(segments.map((x) => [x.source, x.start, x.end]), [['chapter', 60, 120]]);
+    // Sponsors are the only category on, and the chapter covers them: no detection status, no detect.
+    assert.deepEqual(sent, ['getSegments']);
+  } finally {
+    session.destroy();
+  }
+});

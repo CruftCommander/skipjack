@@ -23,6 +23,14 @@ export interface MediaRef {
   id: string;
 }
 
+/** A chapter of the media, as the platform lists it. Times are in seconds. */
+export interface MediaChapter {
+  title: string;
+  start: number;
+  /** True when the creator wrote the chapter, false when the platform generated it. */
+  byCreator: boolean;
+}
+
 /** A span of media to skip, as reported by a segment source. Times are in seconds. */
 export interface Segment {
   /** Unique within the media. Prefixed with the source ID, for example `sponsorblock:<uuid>`. */

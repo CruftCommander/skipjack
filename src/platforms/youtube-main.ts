@@ -7,6 +7,11 @@
 
 import {
   captionCandidates,
+  CHAPTERS_MESSAGE_SOURCE,
+  CHAPTERS_REQUEST_ATTR,
+  CHAPTERS_REQUEST_EVENT,
+  type ChaptersReply,
+  type ChaptersRequest,
   hasProofOfOrigin,
   MIN_DETECT_SECONDS,
   parseJson3,
@@ -285,6 +290,49 @@ function chaptersFor(videoId: string): { title: string; start: number }[] {
   }
   return out.sort((a, b) => a.start - b.start);
 }
+
+/**
+ * Chapters with who wrote them. YouTube lists each chapter set in the page data's `markersMap`
+ * under a key: DESCRIPTION_CHAPTERS for the creator's, AUTO_CHAPTERS for YouTube's generated ones
+ * (seen in the step 1 probe reports). Other marker sets are ignored. Null while the page data for
+ * this video isn't there.
+ */
+function chaptersWithAuthor(videoId: string): { title: string; start: number; byCreator: boolean }[] | null {
+  const data = pageDataFor(videoId);
+  if (!data) return null;
+  const seen = new Set<string>();
+  const out: { title: string; start: number; byCreator: boolean }[] = [];
+  for (const entry of findAll(data, 'markersMap').flat() as { key?: unknown; value?: unknown }[]) {
+    const key = text(entry?.key);
+    if (key !== 'DESCRIPTION_CHAPTERS' && key !== 'AUTO_CHAPTERS') continue;
+    for (const r of findAll(entry?.value, 'chapterRenderer') as { title?: unknown; timeRangeStartMillis?: unknown }[]) {
+      const start = Number(r?.timeRangeStartMillis ?? 0) / 1000;
+      const title = runsText(r?.title);
+      const id = `${key}|${start}|${title}`;
+      if (!Number.isFinite(start) || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ title, start, byCreator: key === 'DESCRIPTION_CHAPTERS' });
+    }
+  }
+  return out.sort((a, b) => a.start - b.start).slice(0, 100);
+}
+
+document.addEventListener(CHAPTERS_REQUEST_EVENT, () => {
+  let request: ChaptersRequest;
+  try {
+    request = JSON.parse(document.documentElement.getAttribute(CHAPTERS_REQUEST_ATTR) ?? '');
+  } catch {
+    return;
+  }
+  if (!request || typeof request.nonce !== 'string' || typeof request.videoId !== 'string') return;
+  // After in-site navigation the page data for the new video arrives a moment later.
+  void waitFor(() => chaptersWithAuthor(request.videoId), 10_000, 250).then((chapters) => {
+    const reply: ChaptersReply = chapters
+      ? { source: CHAPTERS_MESSAGE_SOURCE, nonce: request.nonce, ok: true, videoId: request.videoId, chapters }
+      : { source: CHAPTERS_MESSAGE_SOURCE, nonce: request.nonce, ok: false, videoId: request.videoId };
+    window.postMessage(reply, location.origin);
+  });
+});
 
 // One capture at a time, and only the newest request counts: two toggles at once would fight over
 // the captions button, and a request for a video the viewer has left must not touch the next one.

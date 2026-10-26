@@ -49,12 +49,14 @@ function manifest(target) {
     m.browser_specific_settings = {
       gecko: {
         id: 'skipjack@cruftcommander.github.io',
-        strict_min_version: '128.0',
-        // Required by addons.mozilla.org for new submissions. Revisit before publishing: detection
-        // sends a video's captions to Anthropic when the user adds a key, which AMO may class as
-        // website content.
-        data_collection_permissions: { required: ['none'] },
+        // 140 is the first version that reads data_collection_permissions (142 on Android).
+        strict_min_version: '140.0',
+        // Firefox shows this at install. With a key, detection sends a video's captions to the
+        // user's LLM provider, which Mozilla classes as website content. Declared as required,
+        // decided by Jeff on 2026-10-25, although users without a key send none.
+        data_collection_permissions: { required: ['websiteContent'] },
       },
+      gecko_android: { strict_min_version: '142.0' },
     };
   }
   return m;
@@ -79,7 +81,7 @@ async function buildTarget(target) {
     outdir: out,
     bundle: true,
     format: 'iife',
-    target: target === 'chromium' ? 'chrome111' : 'firefox128',
+    target: target === 'chromium' ? 'chrome111' : 'firefox140',
     define: { SKIPJACK_VERSION: JSON.stringify(pkg.version) },
     sourcemap: 'linked',
     legalComments: 'none',

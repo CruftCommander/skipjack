@@ -2,13 +2,27 @@
 // YouTube page. Run `npm run build` first. Usage: node test/e2e/sponsorblock.mjs
 //
 // Checks: a SponsorBlock sponsor is skipped with a toast not marked "(detected)", without touching
-// captions or calling Anthropic; a channel excluded by handle on the settings page gets no lookup.
+// captions or calling Anthropic; a creator chapter titled "Sponsor" is skipped with no key and
+// labeled "(chapter)", while a YouTube auto-chapter is not; a channel excluded by handle on the
+// settings page gets no lookup.
 
 import { launch } from './harness.mjs';
 
 const ids = ['sbvideo0001', 'sbvideo0002'];
+const plain = { lengthSeconds: '120', isLive: false, isLiveContent: false };
 const t = await launch({
-  videos: Object.fromEntries(ids.map((id) => [id, { lengthSeconds: '120', isLive: false, isLiveContent: false }])),
+  videos: {
+    ...Object.fromEntries(ids.map((id) => [id, plain])),
+    // Not in SponsorBlock's answer. The creator's "Sponsor" chapter runs 0:08 to 0:21; YouTube's
+    // generated "Sponsor break" at 0:40 to 0:50 must not be skipped on its own.
+    chvideo0001: {
+      ...plain,
+      chapters: {
+        DESCRIPTION_CHAPTERS: [['Intro', 0], ['Sponsor', 8], ['Main', 21]],
+        AUTO_CHAPTERS: [['Opening', 0], ['Sponsor break', 40], ['Story', 50]],
+      },
+    },
+  },
   // A hash-prefix answer listing both videos; Skipjack picks its own.
   sponsorblock: ids.map((videoID) => ({ videoID, segments: [{ category: 'sponsor', actionType: 'skip', segment: [8, 21], UUID: `u-${videoID}` }] })),
 });
@@ -29,7 +43,20 @@ try {
     await page.close();
   }
 
-  // 2. Exclude the channel from the settings page by handle; its videos are not looked up.
+  // 2. A creator chapter titled "Sponsor" is skipped with no key; YouTube's auto-chapter is not.
+  {
+    const { page, logs } = await open('chvideo0001');
+    const found = await waitFor(() => logs.find((l) => /sponsor segment\(s\) from the creator's chapter titles/.test(l)), 30000);
+    check('chapter: one sponsor segment from the creator chapter', /: 1 sponsor segment/.test(found ?? ''), found ?? logs.join(' | '));
+    const skipped = await waitFor(() => logs.find((l) => /skipped sponsor/.test(l)), 30000);
+    check('chapter: sponsor skipped', /skipped sponsor 0:0\d -> 0:2\d/.test(skipped ?? ''), skipped ?? logs.join(' | '));
+    const toast = (await pageText(page)).match(/Skipped sponsor[^U]*/)?.[0] ?? '';
+    check('chapter: toast says (chapter)', /Skipped sponsor \(chapter\)/.test(toast), toast);
+    check('chapter: no Anthropic request', calls.anthropic === 0);
+    await page.close();
+  }
+
+  // 3. Exclude the channel from the settings page by handle; its videos are not looked up.
   {
     const opts = await ctx.newPage();
     await opts.goto(`chrome-extension://${extId}/options.html`);
