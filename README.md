@@ -76,6 +76,7 @@ Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each vi
 | `npm test` | Runs the unit tests with Node's built-in test runner |
 | `npm run check` | Runs the type check, the tests, and the build, in that order |
 | `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an Anthropic API key. See [`eval/README.md`](eval/README.md). |
+| `npm run icons` | Renders `src/icons/icon.svg` to the PNGs the manifests use. Run it after changing the SVG. Needs Playwright, as `npm run e2e` does. |
 | `npm run e2e` | Builds, then checks the extension end to end in Chromium against a mock YouTube page. Needs Playwright. See [`test/e2e/README.md`](test/e2e/README.md). |
 
 ### Release

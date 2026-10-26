@@ -12,7 +12,8 @@
     "test": "node scripts/test.mjs",
     "check": "npm run typecheck && npm test && npm run build",
     "eval": "node scripts/eval.mjs",
-    "e2e": "npm run build && node test/e2e/detect.mjs && node test/e2e/sponsorblock.mjs"
+    "e2e": "npm run build && node test/e2e/detect.mjs && node test/e2e/sponsorblock.mjs",
+    "icons": "node scripts/icons.mjs"
   },
   "devDependencies": {
     "@types/chrome": "0.3.5",

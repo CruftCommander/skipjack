@@ -15,19 +15,24 @@ const watch = process.argv.includes('--watch');
 
 const YOUTUBE = ['https://www.youtube.com/*', 'https://m.youtube.com/*'];
 
+/** PNGs rendered from src/icons/icon.svg by `npm run icons`. Keep in step with scripts/icons.mjs. */
+const ICON_SIZES = [16, 32, 48, 128];
+const iconSet = (sizes) => Object.fromEntries(sizes.map((size) => [String(size), `icons/icon-${size}.png`]));
+
 function manifest(target) {
   const m = {
     manifest_version: 3,
     name: 'Skipjack',
     version: pkg.version,
     description: 'Skip the pitch. Skips sponsor reads, interaction reminders, and self-promotion in videos.',
+    icons: iconSet(ICON_SIZES),
     permissions: ['storage'],
     // SponsorBlock for community segments; Anthropic for detection with the user's own key.
     host_permissions: ['https://sponsor.ajay.app/*', 'https://api.anthropic.com/*'],
     commands: {
       'undo-skip': { suggested_key: { default: 'Alt+Shift+U' }, description: 'Undo the last skip' },
     },
-    action: { default_title: 'Skipjack', default_popup: 'popup.html' },
+    action: { default_title: 'Skipjack', default_popup: 'popup.html', default_icon: iconSet([16, 32]) },
     options_ui: { page: 'options.html', open_in_tab: true },
     content_scripts: [
       // Isolated world: the extension's own logic.
@@ -84,6 +89,10 @@ async function buildTarget(target) {
   await writeFile(join(out, 'manifest.json'), JSON.stringify(manifest(target), null, 2) + '\n');
   for (const [dir, file] of [['options', 'options.html'], ['options', 'options.css'], ['popup', 'popup.html'], ['popup', 'popup.css']]) {
     await copyFile(join(root, 'src', dir, file), join(out, file));
+  }
+  await mkdir(join(out, 'icons'), { recursive: true });
+  for (const size of ICON_SIZES) {
+    await copyFile(join(root, 'src', 'icons', `icon-${size}.png`), join(out, 'icons', `icon-${size}.png`));
   }
 
   if (watch) {
