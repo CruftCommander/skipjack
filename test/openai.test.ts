@@ -71,7 +71,7 @@ test('the request uses the Responses API with a forced strict tool, no storage, 
   assert.equal(luna.store, false);
   assert.equal(luna.parallel_tool_calls, false);
   assert.deepEqual(luna.tool_choice, { type: 'function', name: TOOL.name });
-  assert.deepEqual(luna.reasoning, { effort: 'none' });
+  assert.deepEqual(luna.reasoning, { effort: 'low' });
   assert.deepEqual(buildRequest(input, 'gpt-6.1-sol').reasoning, { effort: 'low' });
   // An unknown model gets no reasoning setting, so the API applies its default.
   assert.equal('reasoning' in buildRequest(input, 'gpt-7-unknown'), false);
@@ -134,7 +134,7 @@ test('the provider falls back to the default reasoning effort when a model refus
     const body = JSON.parse(String(init?.body));
     efforts.push(body.reasoning);
     if (body.reasoning) {
-      return new Response(JSON.stringify({ error: { message: "Unsupported value: 'none' is not supported with this model. Supported values are: 'low', 'medium'.", type: 'invalid_request_error', param: 'reasoning.effort' } }), { status: 400 });
+      return new Response(JSON.stringify({ error: { message: "Unsupported value: 'low' is not supported with this model. Supported values are: 'medium', 'high'.", type: 'invalid_request_error', param: 'reasoning.effort' } }), { status: 400 });
     }
     return sse(toolStream({ segments: [] }));
   });
@@ -142,7 +142,7 @@ test('the provider falls back to the default reasoning effort when a model refus
   assert.deepEqual((await provider.detect(input, opts)).segments, []);
   await provider.detect(input, opts);
   // The refusal is remembered: the second video goes straight to the default.
-  assert.deepEqual(efforts, [{ effort: 'none' }, undefined, undefined]);
+  assert.deepEqual(efforts, [{ effort: 'low' }, undefined, undefined]);
 });
 
 test('the provider separates errors before the request is accepted from failures after', async () => {

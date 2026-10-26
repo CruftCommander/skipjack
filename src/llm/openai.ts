@@ -25,14 +25,14 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 type Effort = 'none' | 'low' | 'medium' | 'high';
 
 /**
- * Models offered, cheapest first, with how much they should think before answering. Detection is
- * a reading task, so each gets the least reasoning its model allows: Luna supports none; Sol's
- * floor is low. Prices from https://developers.openai.com/api/docs/pricing, 2026-10-26:
- * Luna $0.10 in / $0.50 out per million tokens, 6.1 Sol $2 / $10. Claude's call, open to change
- * once the eval has run on them.
+ * Models offered, cheapest first, with how much they should think before answering. Both run at
+ * low, the least Sol allows. Luna supports none, but the eval on 2026-10-26 (15 verified segments)
+ * found 13 of 15 with 21 of 26 boundaries passing at low against 12 of 15 and 17 of 24 at none,
+ * for the same 2 cents. Prices from https://developers.openai.com/api/docs/pricing, 2026-10-26:
+ * Luna $0.10 in / $0.50 out per million tokens, 6.1 Sol $2 / $10.
  */
 export const OPENAI_MODELS: readonly { id: string; label: string; effort: Effort }[] = [
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'none' },
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'low' },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', effort: 'low' },
 ];
 
