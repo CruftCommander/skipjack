@@ -11,7 +11,10 @@
 
 import { buildUserMessage, SYSTEM_PROMPT, TOOL, TOOL_NAME, transcriptLines } from '../detect/prompt';
 import { parseToolInput, refine, toTimed } from '../detect/postprocess';
-import { SpentError, type DetectionInput, type DetectionResult, type DetectOptions, type LlmProvider } from './provider';
+import { ApiError, SpentError, type DetectionInput, type DetectionResult, type DetectOptions, type LlmProvider } from './provider';
+import { parseEvent, readSse } from './sse';
+
+export { ApiError };
 
 export const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
@@ -37,16 +40,6 @@ export function buildRequest(input: DetectionInput, model: string, toolChoice: T
   };
 }
 
-/** An error the API returned before generating anything, so nothing was spent. */
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
-
 interface Streamed {
   model: string | null;
   inputTokens: number;
@@ -63,17 +56,10 @@ interface Streamed {
 export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () => void): Promise<Streamed> {
   const out: Streamed = { model: null, inputTokens: 0, outputTokens: 0, stopReason: null, toolJson: null };
   let toolIndex: number | null = null;
-  let buffer = '';
-  const decoder = new TextDecoder();
-  const reader = body.getReader();
 
   const handle = (data: string): void => {
-    let e: Record<string, unknown>;
-    try {
-      e = JSON.parse(data);
-    } catch {
-      return;
-    }
+    const e = parseEvent(data);
+    if (!e) return;
     switch (e.type) {
       case 'message_start': {
         const m = e.message as { model?: string; usage?: { input_tokens?: number; output_tokens?: number } } | undefined;
@@ -112,36 +98,7 @@ export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () 
     }
   };
 
-  let finished = false;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      onChunk?.();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      // Events are separated by a blank line; each has "event:" and "data:" lines.
-      let cut: number;
-      while ((cut = buffer.search(/\r?\n\r?\n/)) >= 0) {
-        const chunk = buffer.slice(0, cut);
-        buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, '');
-        const data = chunk
-          .split(/\r?\n/)
-          .filter((l) => l.startsWith('data:'))
-          .map((l) => l.slice(5).trimStart())
-          .join('\n');
-        if (data) handle(data);
-      }
-      if (done) break;
-    }
-    finished = true;
-  } finally {
-    // On an error event or a failed read, stop the download rather than leave it running.
-    if (finished) reader.releaseLock();
-    else await reader.cancel().catch(() => undefined);
-  }
-  if (buffer.trim()) {
-    const data = buffer.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
-    if (data) handle(data);
-  }
+  await readSse(body, handle, { onChunk });
   return out;
 }
 
@@ -181,6 +138,9 @@ export function createAnthropicProvider(fetchFn: FetchFn = (i, init) => fetch(i,
       { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
       { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
     ],
+    keyPlaceholder: 'sk-ant-...',
+    keysUrl: 'https://platform.claude.com/settings/keys',
+    isKey: (key) => /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key),
     async detect(input: DetectionInput, options: DetectOptions): Promise<DetectionResult> {
       let response: Response;
       if (noForcedTool.has(options.model)) {

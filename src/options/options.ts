@@ -202,59 +202,86 @@ channelInput.addEventListener('keydown', (e) => {
 channels.onChanged(renderChannels);
 void channels.list().then(renderChannels);
 
-// Detection: the model list, the API key (local storage only), and the last detection result.
+// Detection: the model list, one API key per provider (local storage only), and the last detection result.
 
 const modelSelect = document.getElementById('model') as HTMLSelectElement;
 for (const provider of llmProviders) {
-  for (const m of provider.models) modelSelect.append(new Option(m.label, m.id));
+  const group = document.createElement('optgroup');
+  group.label = provider.label;
+  for (const m of provider.models) group.append(new Option(m.label, m.id));
+  modelSelect.append(group);
 }
 
-const keyProvider = llmProviders[0];
-const keyInput = document.getElementById('api-key') as HTMLInputElement;
-const keySave = document.getElementById('api-key-save') as HTMLButtonElement;
-const keyRemove = document.getElementById('api-key-remove') as HTMLButtonElement;
-const keyStatus = document.getElementById('api-key-status') as HTMLParagraphElement;
 const detectionLast = document.getElementById('detection-last') as HTMLParagraphElement;
-
-async function renderKey(): Promise<void> {
-  if (!keyProvider) return;
-  const key = await shell.getLocal(apiKeyStorageKey(keyProvider.id));
-  const set = typeof key === 'string' && key.length > 0;
-  keyRemove.hidden = !set;
-  // Show only the last four characters, so the key is recognizable but not readable.
-  keyStatus.textContent = set ? `A key ending in ${key.slice(-4)} is saved.` : 'No key saved. Detection is off until you add one.';
-}
-
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-keySave.addEventListener('click', async () => {
-  if (!keyProvider) return;
-  const key = keyInput.value.trim();
-  if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) {
-    keyStatus.textContent = "That doesn't look like an Anthropic API key. Keys start with sk-ant-.";
-    return;
-  }
-  try {
-    await shell.setLocalItems({ [apiKeyStorageKey(keyProvider.id)]: key });
-  } catch (error) {
-    // Keep what was typed, so a retry needs no re-paste.
-    keyStatus.textContent = `The key was not saved: ${errorText(error)}`;
-    return;
-  }
-  keyInput.value = '';
-  await renderKey().catch(() => undefined);
-});
+/** One key row per provider: input, Save, Remove, and a status line. Element IDs end in the provider's ID. */
+const keyRows = new Map<string, () => Promise<void>>();
+const keysBox = document.getElementById('api-keys') as HTMLDivElement;
+for (const provider of llmProviders) {
+  const storageKey = apiKeyStorageKey(provider.id);
+  const row = document.createElement('div');
+  row.className = 'row add key';
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.id = `api-key-${provider.id}`;
+  input.placeholder = `${provider.label} API key (${provider.keyPlaceholder})`;
+  input.setAttribute('aria-label', `${provider.label} API key`);
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.id = `api-key-save-${provider.id}`;
+  save.textContent = 'Save key';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.id = `api-key-remove-${provider.id}`;
+  remove.textContent = 'Remove';
+  remove.hidden = true;
+  row.append(input, save, remove);
+  const status = document.createElement('p');
+  status.id = `api-key-status-${provider.id}`;
+  status.className = 'hint';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  keysBox.append(row, status);
 
-keyRemove.addEventListener('click', async () => {
-  if (!keyProvider) return;
-  try {
-    await shell.removeLocal([apiKeyStorageKey(keyProvider.id)]);
-  } catch (error) {
-    keyStatus.textContent = `The key was not removed: ${errorText(error)}`;
-    return;
-  }
-  await renderKey().catch(() => undefined);
-});
+  const render = async (): Promise<void> => {
+    const key = await shell.getLocal(storageKey);
+    const set = typeof key === 'string' && key.length > 0;
+    remove.hidden = !set;
+    // Show only the last four characters, so the key is recognizable but not readable.
+    status.textContent = set ? `${provider.label} key ending in ${key.slice(-4)} saved.` : `No ${provider.label} key saved. Its models are off until you add one.`;
+  };
+  keyRows.set(storageKey, render);
+
+  save.addEventListener('click', async () => {
+    const key = input.value.trim();
+    if (!provider.isKey(key)) {
+      status.textContent = `That doesn't look like an ${provider.label} API key. Keys start with ${provider.keyPlaceholder.replace(/\.\.\.$/, '')}.`;
+      return;
+    }
+    try {
+      await shell.setLocalItems({ [storageKey]: key });
+    } catch (error) {
+      // Keep what was typed, so a retry needs no re-paste.
+      status.textContent = `The key was not saved: ${errorText(error)}`;
+      return;
+    }
+    input.value = '';
+    await render().catch(() => undefined);
+  });
+
+  remove.addEventListener('click', async () => {
+    try {
+      await shell.removeLocal([storageKey]);
+    } catch (error) {
+      status.textContent = `The key was not removed: ${errorText(error)}`;
+      return;
+    }
+    await render().catch(() => undefined);
+  });
+}
 
 const cacheClear = document.getElementById('detection-clear') as HTMLButtonElement;
 const cacheStatus = document.getElementById('detection-clear-status') as HTMLParagraphElement;
@@ -287,7 +314,7 @@ async function renderLastDetection(): Promise<void> {
 
 shell.onLocalKeysChanged((keys) => {
   if (keys.includes(DETECTION_STATUS_KEY)) void renderLastDetection();
-  if (keyProvider && keys.includes(apiKeyStorageKey(keyProvider.id))) void renderKey();
+  for (const key of keys) void keyRows.get(key)?.();
 });
-void renderKey();
+for (const render of keyRows.values()) void render();
 void renderLastDetection();

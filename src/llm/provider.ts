@@ -67,6 +67,12 @@ export interface LlmProvider {
   readonly label: string;
   /** Models offered in settings, cheapest first. */
   readonly models: readonly { id: string; label: string }[];
+  /** How this provider's keys begin, shown as a placeholder in settings, for example `sk-ant-...`. */
+  readonly keyPlaceholder: string;
+  /** Where the user makes a key. */
+  readonly keysUrl: string;
+  /** True when `key` has the shape of this provider's keys. Catches a key pasted into the wrong box. */
+  isKey(key: string): boolean;
   detect(input: DetectionInput, options: DetectOptions): Promise<DetectionResult>;
 }
 
@@ -75,3 +81,18 @@ export interface LlmProvider {
  * The caller remembers the failure for a while instead of paying again on the next visit.
  */
 export class SpentError extends Error {}
+
+/**
+ * An error the API returned before generating anything, so nothing was spent, or a transient failure
+ * it reported mid-stream (overload, say). Neither is cached. `status` is 0 for a mid-stream error.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    /** The request field the API objected to, when it names one (OpenAI's `param`). */
+    readonly param: string | null = null,
+  ) {
+    super(message);
+  }
+}

@@ -116,6 +116,9 @@ function fakeProvider(calls: { n: number }, fail: boolean | 'spent' = false): Ll
     id: 'anthropic',
     label: 'Anthropic',
     models: [{ id: 'claude-sonnet-5-5', label: 'Sonnet' }],
+    keyPlaceholder: 'sk-ant-...',
+    keysUrl: '',
+    isKey: () => true,
     async detect() {
       calls.n++;
       await new Promise((r) => setTimeout(r, 10));
@@ -242,7 +245,7 @@ const model = 'claude-sonnet-5-5';
 
 /** A provider whose detect() is scripted per test. */
 function scripted(run: LlmProvider['detect']): LlmProvider {
-  return { id: 'anthropic', label: 'Anthropic', models: [{ id: model, label: 'Sonnet' }], detect: run };
+  return { id: 'anthropic', label: 'Anthropic', models: [{ id: model, label: 'Sonnet' }], keyPlaceholder: 'sk-ant-...', keysUrl: '', isKey: () => true, detect: run };
 }
 
 /** Waits for the signal, then throws what fetch() or the provider would. */

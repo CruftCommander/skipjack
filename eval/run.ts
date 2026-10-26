@@ -1,20 +1,30 @@
 // Model eval: runs detection on every probe report that has ground truth and scores it.
-// Run with `npm run eval`. Needs ANTHROPIC_API_KEY in the environment. See eval/README.md.
+// Run with `npm run eval`. Needs ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment, for the
+// providers of the models being run. See eval/README.md.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatTime } from '../src/core/format';
-import { createAnthropicProvider } from '../src/llm/anthropic';
-import type { DetectedSegment, DetectionInput } from '../src/llm/provider';
+import type { DetectedSegment, DetectionInput, LlmProvider } from '../src/llm/provider';
+import { providerForModel } from '../src/llm/registry';
 import { reportToInput } from './report';
 import { scoreVideo, type TruthSegment, type VideoScore } from './score';
 
-/** Dollars per million tokens, from https://platform.claude.com/docs/en/models/overview (2026-10-21). */
+/**
+ * Dollars per million tokens, from https://platform.claude.com/docs/en/models/overview (2026-10-21)
+ * and https://developers.openai.com/api/docs/pricing (2026-10-26).
+ */
 const PRICES: Record<string, { input: number; output: number }> = {
   'claude-haiku-5-5': { input: 0.1, output: 0.5 },
   'claude-sonnet-5-5': { input: 2, output: 10 },
   'claude-opus-5-5': { input: 4, output: 20 },
+  'gpt-6-luna': { input: 0.1, output: 0.5 },
+  'gpt-6.1-sol': { input: 2, output: 10 },
+  'gpt-6-astra': { input: 10, output: 50 },
 };
+
+/** The environment variable that holds each provider's key. */
+const KEY_VARS: Record<string, string> = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY' };
 
 const args = process.argv.slice(2);
 const arg = (name: string): string | undefined => {
@@ -24,10 +34,22 @@ const arg = (name: string): string | undefined => {
 const reportsDir = arg('reports') ?? 'probe/reports';
 const models = (arg('models') ?? 'claude-haiku-5-5,claude-sonnet-5-5').split(',').map((m) => m.trim()).filter(Boolean);
 const only = arg('video');
-const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-if (!apiKey) {
-  console.error('ANTHROPIC_API_KEY is not set or is empty. See eval/README.md.');
-  process.exit(2);
+
+/** Each model's provider and key, checked before anything is spent. */
+const runners = new Map<string, { provider: LlmProvider; apiKey: string }>();
+for (const model of models) {
+  const provider = providerForModel(model);
+  if (!provider) {
+    console.error(`No provider offers the model ${model}.`);
+    process.exit(2);
+  }
+  const keyVar = KEY_VARS[provider.id] ?? `${provider.id.toUpperCase()}_API_KEY`;
+  const apiKey = process.env[keyVar]?.trim();
+  if (!apiKey) {
+    console.error(`${keyVar} is not set or is empty; ${model} needs it. See eval/README.md.`);
+    process.exit(2);
+  }
+  runners.set(model, { provider, apiKey });
 }
 
 const truthPath = join(reportsDir, 'ground-truth.json');
@@ -64,7 +86,6 @@ if (reports.length === 0) {
   process.exit(2);
 }
 
-const provider = createAnthropicProvider();
 const t = formatTime;
 const s1 = (n: number): string => n.toFixed(1);
 
@@ -86,6 +107,7 @@ const results: Record<string, unknown> = {};
 const summary: Record<string, Totals> = {};
 
 for (const model of models) {
+  const { provider, apiKey } = runners.get(model)!;
   const tot: Totals = { truth: 0, matched: 0, boundaries: 0, passed: 0, pitchShown: 0, contentLost: 0, falsePositives: 0, inputTokens: 0, outputTokens: 0, ms: 0, errors: 0 };
   summary[model] = tot;
   console.log(`\n=== ${model} ===`);

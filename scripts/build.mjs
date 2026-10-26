@@ -27,8 +27,8 @@ function manifest(target) {
     description: 'Skip the pitch. Skips sponsor reads, interaction reminders, and self-promotion in videos.',
     icons: iconSet(ICON_SIZES),
     permissions: ['storage'],
-    // SponsorBlock for community segments; Anthropic for detection with the user's own key.
-    host_permissions: ['https://sponsor.ajay.app/*', 'https://api.anthropic.com/*'],
+    // SponsorBlock for community segments; the LLM providers for detection with the user's own key.
+    host_permissions: ['https://sponsor.ajay.app/*', 'https://api.anthropic.com/*', 'https://api.openai.com/*'],
     commands: {
       'undo-skip': { suggested_key: { default: 'Alt+Shift+U' }, description: 'Undo the last skip' },
     },

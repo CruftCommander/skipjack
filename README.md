@@ -4,7 +4,7 @@
 
 Skipjack is a browser extension that skips the sponsor reads, interaction reminders, and self-promotion that creators record into their own videos. It works on YouTube in Microsoft Edge and Chrome, with Firefox support built but untested.
 
-Skipjack is in early development. It skips segments that the [SponsorBlock](https://sponsor.ajay.app) community has already marked, and, with your own Anthropic API key, finds the ones nobody has marked by reading the video's captions.
+Skipjack is in early development. It skips segments that the [SponsorBlock](https://sponsor.ajay.app) community has already marked, and, with your own Anthropic or OpenAI API key, finds the ones nobody has marked by reading the video's captions.
 
 ## Status
 
@@ -14,6 +14,7 @@ Skipjack is in early development. It skips segments that the [SponsorBlock](http
 | 2. Skeleton | The extension: SponsorBlock lookup, skipping, the skip toast with Undo, and settings | Done |
 | 3. Detection | Transcript analysis with your own LLM provider and key, starting with Anthropic | Done |
 | 4. Packaging | Store-ready packages for Chromium and Firefox from one release workflow | In progress |
+| 5. More providers | OpenAI as a second LLM provider, with one key per provider | In progress |
 
 ## What it skips
 
@@ -40,7 +41,7 @@ Other behavior you can change on the settings page:
 - **Short segments.** Interaction reminders and self-promotion shorter than 5 seconds are left alone. Sponsor reads are skipped at any length.
 - **Near the end of a video.** Skipping a segment that runs to the end jumps to the end screen, which can start the next video. By default, when a skip would land within 5 seconds of the end, Skipjack lets the segment play. You can choose to skip anyway, or to skip and pause. A sponsor read is never left to play: with the default setting, it is skipped and the video pauses.
 - **Channels.** You can turn skipping off for a channel. Select the Skipjack button in the toolbar while one of its videos is open, and clear **Skip segments on this channel**. You can also add a channel by URL, @handle, or channel ID on the settings page, under **Channels**. Skipjack doesn't look up videos from an excluded channel at all. The list syncs with your browser profile and holds up to 250 channels.
-- **Detection.** Add an Anthropic API key on the settings page, under **Detection**, and Skipjack reads each video's captions and asks Claude where the pitches are. By default it runs on every video and fills in only the categories SponsorBlock has no segments for; SponsorBlock's segments win wherever they exist. Results are kept on this computer for 60 days, for up to 2,000 videos, so a video you watch again isn't paid for again; after that, or once older results are dropped to make room, it is analyzed again. If analysis fails after Anthropic accepted the request, the video isn't tried again with that model for a day, and Skipjack analyzes at most 60 new videos an hour. **Clear detection cache**, under **Detection**, removes every saved result. On Claude Sonnet 5.5, the default, a 20-minute video costs about 2 cents. To read the captions, Skipjack switches them on for a moment with the captions hidden from view, then switches them back; you can turn that off, and detection then runs only on videos you watch with captions on.
+- **Detection.** Add an Anthropic or OpenAI API key on the settings page, under **Detection**, pick one of that provider's models, and Skipjack reads each video's captions and asks the model where the pitches are. By default it runs on every video and fills in only the categories SponsorBlock has no segments for; SponsorBlock's segments win wherever they exist. Results are kept on this computer for 60 days, for up to 2,000 videos, so a video you watch again isn't paid for again; after that, or once older results are dropped to make room, it is analyzed again. If analysis fails after the provider accepted the request, the video isn't tried again with that model for a day, and Skipjack analyzes at most 60 new videos an hour. **Clear detection cache**, under **Detection**, removes every saved result. On Claude Sonnet 5.5, the default, or GPT-6.1 Sol, a 20-minute video costs about 2 cents; on Claude Haiku 5.5 or GPT-6 Luna, a fraction of a cent. To read the captions, Skipjack switches them on for a moment with the captions hidden from view, then switches them back; you can turn that off, and detection then runs only on videos you watch with captions on.
 - **Undo shortcut.** Alt+Shift+U undoes the last skip, whether or not the skip message is showing. To change it in Edge, open `edge://extensions/shortcuts`; in Chrome, `chrome://extensions/shortcuts`. In Firefox, open `about:addons`, select the gear button, and then select **Manage Extension Shortcuts**.
 - **Skip message.** After each skip, a message with an **Undo** button appears in the player for 6 seconds. Undo returns to the start of the segment and lets it play.
 
@@ -83,9 +84,10 @@ Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each vi
 | `npm run typecheck` | Type-checks the code without building |
 | `npm test` | Runs the unit tests with Node's built-in test runner |
 | `npm run check` | Runs the type check, the tests, and the build, in that order |
-| `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an Anthropic API key. See [`eval/README.md`](eval/README.md). |
+| `npm run eval` | Scores transcript detection against hand-verified boundaries. Needs an API key for each provider whose models it runs. See [`eval/README.md`](eval/README.md). |
 | `npm run icons` | Renders `src/icons/icon.svg` to the PNGs the manifests use. Run it after changing the SVG. Needs Playwright, as `npm run e2e` does. |
 | `npm run e2e` | Builds, then checks the extension end to end in Chromium against a mock YouTube page. Needs Playwright. See [`test/e2e/README.md`](test/e2e/README.md). |
+| `npm run e2e:firefox` | The same checks in Firefox, as a temporary add-on. Needs Firefox and geckodriver. |
 
 ### Release
 
@@ -115,7 +117,7 @@ Nothing that knows about YouTube, and nothing that knows about one browser, live
 | --- | --- | --- |
 | `src/platforms` | Platform adapters: finding the video, its ID, ads, and navigation for one media site | One new adapter, registered in `registry.ts` |
 | `src/sources` | Segment sources: SponsorBlock today, the transcript detector in step 3 | One new source, passed to `SegmentService` in `src/background/index.ts` |
-| `src/llm` | LLM providers for detection. Anthropic is the first. | One new provider |
+| `src/llm` | LLM providers for detection: Anthropic (Messages API) and OpenAI (Responses API), sharing one prompt and one streaming reader. | One new provider, plus its host permission in `scripts/build.mjs` |
 | `src/browser` | The browser shell: storage, messaging, and extension UI calls | One new shell, if a browser ever stops matching the WebExtensions API |
 
 The rest:
@@ -126,7 +128,7 @@ The rest:
 - `src/detect` holds the detection prompt and the clean-up of model output, shared by every LLM provider.
 - `src/ui` holds the skip toast. `src/options` holds the settings page, and `src/popup` the toolbar popup.
 - `eval` scores detection against hand-verified boundaries. It is a development tool and is not part of the extension.
-- `test/e2e` drives the built extension in Chromium against a mock YouTube page. Like `eval`, it is a development tool.
+- `test/e2e` drives the built extension in Chromium and Firefox against a mock YouTube page. Like `eval`, it is a development tool.
 - `scripts/build.mjs` generates each target's manifest and bundles the scripts.
 
 ## Privacy
@@ -134,11 +136,11 @@ The rest:
 Skipjack has no server of its own. It sends two kinds of request:
 
 - **A segment lookup to SponsorBlock.** The request carries the first 4 characters of the SHA-256 hash of the video ID, not the ID itself, so SponsorBlock cannot tell which video you are watching.
-- **Detection requests to Anthropic, only if you add an API key.** For each video analyzed, Skipjack sends the video's captions, title, chapter titles, whether it is marked as paid promotion, and any description lines that look promotional, using your key. Anthropic's terms for your account apply to that data.
+- **Detection requests to your LLM provider, only if you add an API key.** For each video analyzed, Skipjack sends the video's captions, title, chapter titles, whether it is marked as paid promotion, and any description lines that look promotional, to the provider of the model you picked (Anthropic or OpenAI), using your key for it. That provider's terms for your account apply to that data. Requests to OpenAI ask it not to store the response.
 
-When you install Skipjack in Firefox, Firefox lists website content as data it collects. That refers to the captions sent to Anthropic for detection, which happens only after you add a key.
+When you install Skipjack in Firefox, Firefox lists website content as data it collects. That refers to the captions sent to your LLM provider for detection, which happens only after you add a key.
 
-Your settings and excluded channels are stored in your browser's synced extension storage. Your API key and the detection results stay in local extension storage on this computer and never sync. Web pages can't read local extension storage. In Edge and Chrome, Skipjack also hides it from its own scripts that run on YouTube, so only its settings page and background script can read your key. Firefox has no way to do that, so there Skipjack's script on YouTube pages could read it if the page's renderer were compromised.
+Your settings and excluded channels are stored in your browser's synced extension storage. Your API keys and the detection results stay in local extension storage on this computer and never sync. Web pages can't read local extension storage. In Edge and Chrome, Skipjack also hides it from its own scripts that run on YouTube, so only its settings page and background script can read your keys. Firefox has no way to do that, so there Skipjack's script on YouTube pages could read it if the page's renderer were compromised.
 
 Skipjack does keep a record of the videos it analyzes, on this computer only. Each saved detection result is stored under the video's ID for up to 60 days, and the settings page shows the most recent one. To delete them, select **Clear detection cache** on the settings page, under **Detection**. Removing Skipjack deletes them too.
 

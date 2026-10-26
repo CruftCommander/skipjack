@@ -19,13 +19,13 @@ The eval sends the same prompt the extension sends, through the same Anthropic p
 
   Where you have no preference about a boundary, give `startRange` or `endRange` as `[from, to]` in seconds. Any boundary inside the range passes, and errors are measured from the range's nearest edge.
 
-- An Anthropic API key in the `ANTHROPIC_API_KEY` environment variable.
+- An API key for each provider whose models you run: Anthropic's in `ANTHROPIC_API_KEY`, OpenAI's in `OPENAI_API_KEY`. The eval checks for the keys it needs before spending anything.
 
 Both files stay out of Git, because `probe/reports` is ignored: each report names a video you watched.
 
 ## Run it
 
-Run this block in PowerShell 5.1 or 7. When it asks, copy your Anthropic API key to the clipboard and press Enter. It reads the key from the clipboard, checks it before spending anything, and clears the key and the clipboard afterward:
+Run this block in PowerShell 5.1 or 7. When it asks, copy your Anthropic API key to the clipboard and press Enter. It reads the key from the clipboard, checks it before spending anything, and clears the key and the clipboard afterward. For OpenAI models, change the three `ANTHROPIC` names to `OPENAI`, the `sk-ant-*` check to `sk-*`, and add `-- --models gpt-6-luna,gpt-6.1-sol`:
 
 ```powershell
 & {

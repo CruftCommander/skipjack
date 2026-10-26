@@ -68,15 +68,10 @@
 
       <section id="detection-section">
         <h2>Detection</h2>
-        <p class="hint">For videos SponsorBlock users haven't fully marked, Skipjack can read the video's captions and ask an AI model where the pitches are. It uses your own Anthropic API key. Results are kept on this computer for 60 days, so a video you watch again isn't paid for again; a 20-minute video costs about 2 cents on Claude Sonnet.</p>
+        <p class="hint">For videos SponsorBlock users haven't fully marked, Skipjack can read the video's captions and ask an AI model where the pitches are. It uses your own API key from Anthropic or OpenAI; add a key for the provider of the model you pick. Results are kept on this computer for 60 days, so a video you watch again isn't paid for again; a 20-minute video costs about 2 cents on Claude Sonnet or GPT-6.1 Sol, and a fraction of a cent on Claude Haiku or GPT-6 Luna.</p>
 
-        <div class="row add key">
-          <input type="password" id="api-key" placeholder="Anthropic API key (sk-ant-...)" aria-label="Anthropic API key" autocomplete="off" spellcheck="false">
-          <button type="button" id="api-key-save">Save key</button>
-          <button type="button" id="api-key-remove" hidden>Remove</button>
-        </div>
-        <p id="api-key-status" class="hint" role="status" aria-live="polite"></p>
-        <p class="hint">The key is stored only in this browser on this computer, and is sent only to Anthropic.</p>
+        <div id="api-keys"></div>
+        <p class="hint">Keys are stored only in this browser on this computer, and each is sent only to its own provider.</p>
 
         <fieldset>
           <legend class="sr-only">When to run detection</legend>
