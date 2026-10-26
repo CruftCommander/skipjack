@@ -1,5 +1,5 @@
 // End to end: SponsorBlock skips and channel exclusions, with no API key, against the mock
-// YouTube page. Run `npm run build` first. Usage: node test/e2e/sponsorblock.mjs
+// YouTube page. Run `npm run build` first. Usage: node test/e2e/sponsorblock.mjs [--firefox]
 //
 // Checks: a SponsorBlock sponsor is skipped with a toast not marked "(detected)", without touching
 // captions or calling Anthropic; a creator chapter titled "Sponsor" is skipped with no key and
@@ -26,7 +26,9 @@ const t = await launch({
   // A hash-prefix answer listing both videos; Skipjack picks its own.
   sponsorblock: ids.map((videoID) => ({ videoID, segments: [{ category: 'sponsor', actionType: 'skip', segment: [8, 21], UUID: `u-${videoID}` }] })),
 });
-const { calls, check, open, sleep, waitFor, ctx, extId, pageText } = t;
+const { calls, check, open, openSettings, sleep, waitFor } = t;
+const toggles = (page) => page.evaluate(() => window.__toggles);
+const currentTime = (page) => page.evaluate(() => document.querySelector('video').currentTime);
 
 try {
   // 1. A SponsorBlock sponsor is skipped and labeled as SponsorBlock's.
@@ -34,11 +36,11 @@ try {
     const { page, logs } = await open('sbvideo0001');
     const skipped = await waitFor(() => logs.find((l) => /skipped sponsor/.test(l)), 30000);
     check('SponsorBlock: sponsor skipped', Boolean(skipped), skipped ?? logs.join(' | '));
-    const time = await page.evaluate(() => document.querySelector('video').currentTime);
+    const time = await currentTime(page);
     check('SponsorBlock: playback is past the sponsor', time > 20, `currentTime ${time.toFixed(1)}`);
-    const toast = (await pageText(page)).match(/Skipped sponsor[^U]*/)?.[0] ?? '';
+    const toast = (await page.allText()).match(/Skipped sponsor[^U]*/)?.[0] ?? '';
     check('SponsorBlock: toast shown, not marked detected', /Skipped sponsor \(0:1\d\)/.test(toast) && !/detected/.test(toast), toast);
-    check('SponsorBlock: captions never toggled', (await page.evaluate(() => window.__toggles)) === 0);
+    check('SponsorBlock: captions never toggled', (await toggles(page)) === 0);
     check('SponsorBlock: no Anthropic request', calls.anthropic === 0);
     await page.close();
   }
@@ -50,7 +52,7 @@ try {
     check('chapter: one sponsor segment from the creator chapter', /: 1 sponsor segment/.test(found ?? ''), found ?? logs.join(' | '));
     const skipped = await waitFor(() => logs.find((l) => /skipped sponsor/.test(l)), 30000);
     check('chapter: sponsor skipped', /skipped sponsor 0:0\d -> 0:2\d/.test(skipped ?? ''), skipped ?? logs.join(' | '));
-    const toast = (await pageText(page)).match(/Skipped sponsor[^U]*/)?.[0] ?? '';
+    const toast = (await page.allText()).match(/Skipped sponsor[^U]*/)?.[0] ?? '';
     check('chapter: toast says (chapter)', /Skipped sponsor \(chapter\)/.test(toast), toast);
     check('chapter: no Anthropic request', calls.anthropic === 0);
     await page.close();
@@ -58,14 +60,15 @@ try {
 
   // 3. Exclude the channel from the settings page by handle; its videos are not looked up.
   {
-    const opts = await ctx.newPage();
-    await opts.goto(`chrome-extension://${extId}/options.html`);
+    const opts = await openSettings();
     await opts.fill('#channel-input', '@mockchannel');
     await opts.click('#channel-add');
-    const status = await waitFor(async () => (await opts.locator('#channel-status').textContent()) || null, 5000);
+    const status = await waitFor(() => opts.text('#channel-status'), 5000);
     check('settings: channel excluded', /Not skipping on @mockchannel/.test(status ?? ''), status);
-    const keyStatus = await opts.locator('#api-key-status').textContent();
-    check('settings: key status renders', /No key saved/.test(keyStatus ?? ''), keyStatus);
+    const keyStatus = await opts.text('#api-key-status-anthropic');
+    check('settings: key status renders', /No Anthropic key saved/.test(keyStatus ?? ''), keyStatus);
+    const openaiStatus = await opts.text('#api-key-status-openai');
+    check('settings: a key row per provider', /No OpenAI key saved/.test(openaiStatus ?? ''), openaiStatus);
     await opts.close();
 
     const before = calls.sponsorblock;
