@@ -75,6 +75,8 @@ To try the Firefox build, open `about:debugging#/runtime/this-firefox`, select *
 
 Open DevTools on the YouTube tab and filter the console to `[Skipjack]`. Each video logs how many segments were found and how many will be skipped with your settings, and each skip logs its start and end.
 
+To keep those lines for later, turn on **Keep a diagnostic log** on the settings page, under **Diagnostics**. Skipjack then saves a copy of each line on this computer, for the last 7 days and up to 2,000 lines. **Download log** saves them as a text file in your downloads folder, with times in UTC, and **Clear log** deletes them. Turning the log off stops recording and keeps what was saved until you clear it.
+
 ## Develop
 
 | Command | What it does |
@@ -124,7 +126,7 @@ Nothing that knows about YouTube, and nothing that knows about one browser, live
 The rest:
 
 - `src/core` holds the segment model, settings, the skip policy (`policy.ts`, pure functions), and the controller that drives one media element (`skipper.ts`).
-- `src/background` looks up segments for content scripts. Requests to SponsorBlock happen there, under the extension's host permission.
+- `src/background` looks up segments for content scripts and stores the diagnostic log. Requests to SponsorBlock happen there, under the extension's host permission.
 - `src/content` follows the video the user opens and runs one session per video.
 - `src/detect` holds the detection prompt and the clean-up of model output, shared by every LLM provider.
 - `src/ui` holds the skip toast. `src/options` holds the settings page, and `src/popup` the toolbar popup.
@@ -142,6 +144,8 @@ Skipjack has no server of its own. It sends two kinds of request:
 When you install Skipjack in Firefox, Firefox lists website content as data it collects. That refers to the captions sent to your LLM provider for detection, which happens only after you add a key.
 
 Your settings and excluded channels are stored in your browser's synced extension storage. Your API keys and the detection results stay in local extension storage on this computer and never sync. Web pages can't read local extension storage. In Edge and Chrome, Skipjack also hides it from its own scripts that run on YouTube, so only its settings page and background script can read your keys. Firefox has no way to do that, so there Skipjack's script on YouTube pages could read it if the page's renderer were compromised.
+
+If you turn on the diagnostic log, Skipjack keeps its console lines, which name the videos you watch and their channels, in local extension storage on this computer for up to 7 days. The log never contains your API keys or a video's captions, and Skipjack never sends it anywhere; it leaves the computer only if you download it and share the file. **Clear log** deletes it, and so does removing Skipjack.
 
 Skipjack does keep a record of the videos it analyzes, on this computer only. Each saved detection result is stored under the video's ID for up to 60 days, and the settings page shows the most recent one. To delete them, select **Clear detection cache** on the settings page, under **Detection**. Removing Skipjack deletes them too.
 

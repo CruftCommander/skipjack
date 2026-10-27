@@ -117,6 +117,20 @@
         </label>
       </section>
 
+      <section id="diagnostics-section">
+        <h2>Diagnostics</h2>
+        <label class="row">
+          <input type="checkbox" name="diagnostics.log">
+          <span>Keep a diagnostic log<small>Saves a copy of Skipjack's console messages on this computer, so you can download them and read them later. Keeps the last 7 days, up to 2,000 lines. The log lists the videos you watch; it is never sent anywhere, and it never contains your API keys or a video's captions.</small></span>
+        </label>
+        <p id="log-summary" class="hint"></p>
+        <div class="buttons">
+          <button type="button" id="log-download">Download log</button>
+          <button type="button" id="log-clear">Clear log</button>
+        </div>
+        <p id="log-status" class="hint" role="status" aria-live="polite"></p>
+      </section>
+
       <section>
         <details>
           <summary>Advanced</summary>

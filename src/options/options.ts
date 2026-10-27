@@ -5,8 +5,18 @@ import { ChannelStore } from '../browser/channel-store';
 import type { ChannelRef } from '../core/channels';
 import { DEFAULT_SETTINGS, normalizeSettings, SETTINGS_KEY, type Settings } from '../core/settings';
 import { channelUrl, parseChannel } from '../platforms/registry';
-import { DETECTION_CACHE_PREFIX, DETECTION_STATUS_KEY, detectionCacheKeys, type DetectionStatus } from '../core/messages';
+import {
+  DETECTION_CACHE_PREFIX,
+  DETECTION_STATUS_KEY,
+  detectionCacheKeys,
+  type ClearLogRequest,
+  type ClearLogResponse,
+  type DetectionStatus,
+} from '../core/messages';
+import { appendLog, formatLog, LOG_KEY, logFileName, readLog, type LogEntry } from '../core/logbook';
 import { apiKeyStorageKey, llmProviders } from '../llm/registry';
+
+declare const SKIPJACK_VERSION: string;
 
 const shell = createWebExtShell();
 const channels = new ChannelStore(shell);
@@ -62,7 +72,8 @@ function selectValue(select: HTMLSelectElement, value: string): void {
 function syncDisabled(settings: Settings): void {
   const off = !settings.enabled;
   for (const input of controls()) {
-    if (input.name === 'enabled') continue;
+    // The diagnostic log still records while skipping is paused, so it stays available.
+    if (input.name === 'enabled' || input.name === 'diagnostics.log') continue;
     input.disabled = off || (input.name === 'minLength.seconds' && !settings.minLength.enabled);
   }
 }
@@ -312,9 +323,78 @@ async function renderLastDetection(): Promise<void> {
   detectionLast.textContent = `Last detection, ${when}: ${st.ok ? '' : 'failed: '}${st.message}${tokens}`;
 }
 
+// Diagnostics: the log is written by the background script; this page shows its size, saves it as a
+// text file, and asks the background to clear it.
+
+const logSummary = document.getElementById('log-summary') as HTMLParagraphElement;
+const logDownload = document.getElementById('log-download') as HTMLButtonElement;
+const logClear = document.getElementById('log-clear') as HTMLButtonElement;
+const logStatus = document.getElementById('log-status') as HTMLParagraphElement;
+
+/** The saved log, without lines that aged out since it was last written. */
+async function savedLog(): Promise<LogEntry[]> {
+  return appendLog(readLog(await shell.getLocal(LOG_KEY)), [], Date.now());
+}
+
+async function renderLogSummary(): Promise<void> {
+  const entries = await savedLog();
+  const first = entries[0];
+  const last = entries[entries.length - 1];
+  logSummary.textContent =
+    first && last
+      ? `${entries.length.toLocaleString()} line${entries.length === 1 ? '' : 's'} saved, from ${new Date(first.at).toLocaleString()} to ${new Date(last.at).toLocaleString()}.`
+      : 'No log saved.';
+}
+
+logDownload.addEventListener('click', async () => {
+  try {
+    const entries = await savedLog();
+    if (entries.length === 0) {
+      logStatus.textContent = 'The log is empty. Turn on the log, then watch a video.';
+      return;
+    }
+    const now = new Date();
+    const text = formatLog(entries, [
+      `Skipjack ${SKIPJACK_VERSION} diagnostic log`,
+      `Browser: ${navigator.userAgent}`,
+      `Saved: ${now.toISOString()}`,
+      `${entries.length} lines. Times are UTC.`,
+    ]);
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = logFileName(now);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    // Revoked later, not at once: the browser may still be reading the file.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    logStatus.textContent = `Saving ${entries.length.toLocaleString()} lines as ${link.download} in your downloads folder.`;
+  } catch (error) {
+    logStatus.textContent = `The log was not saved: ${errorText(error)}`;
+  }
+});
+
+logClear.addEventListener('click', async () => {
+  logClear.disabled = true;
+  try {
+    const reply = await shell.sendMessage<ClearLogResponse | undefined>({ type: 'clearLog' } satisfies ClearLogRequest);
+    if (!reply?.ok) throw new Error(reply?.error ?? 'no answer from the background script');
+    logStatus.textContent =
+      reply.removed === 0 ? 'The log was already empty.' : `Cleared ${reply.removed.toLocaleString()} line${reply.removed === 1 ? '' : 's'}.`;
+  } catch (error) {
+    logStatus.textContent = `The log was not cleared: ${errorText(error)}`;
+  } finally {
+    logClear.disabled = false;
+    void renderLogSummary();
+  }
+});
+
 shell.onLocalKeysChanged((keys) => {
+  if (keys.includes(LOG_KEY)) void renderLogSummary();
   if (keys.includes(DETECTION_STATUS_KEY)) void renderLastDetection();
   for (const key of keys) void keyRows.get(key)?.();
 });
 for (const render of keyRows.values()) void render();
 void renderLastDetection();
+void renderLogSummary();

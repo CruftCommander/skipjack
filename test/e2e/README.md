@@ -7,7 +7,7 @@ They run in Edge, Chrome, or a plain Chromium build (`dist/chromium`, over the C
 | Script | What it checks |
 | --- | --- |
 | `detect.mjs` | Detection with a key: no key sends nothing; a past live stream's recording is analyzed and its sponsor skipped with the "(detected)" toast; captions are switched back; a tokenless caption request from another script on the page (as the step 1 probe makes) does not hide the player's; content scripts can't read local storage (Chromium browsers only; Firefox has no such control, so the check is skipped); the second visit is cached; a stream that is live now is not analyzed; the settings page shows the last detection and **Clear detection cache** works; an OpenAI model with an OpenAI key is served by OpenAI, not Anthropic. |
-| `sponsorblock.mjs` | With no key: a SponsorBlock sponsor is skipped and labeled as SponsorBlock's; a creator chapter titled "Sponsor" is skipped and labeled "(chapter)" while a YouTube auto-chapter is not; a channel excluded by handle on the settings page gets no lookup; the settings page shows a key row per provider. |
+| `sponsorblock.mjs` | With no key: a SponsorBlock sponsor is skipped and labeled as SponsorBlock's; a creator chapter titled "Sponsor" is skipped and labeled "(chapter)" while a YouTube auto-chapter is not; the diagnostic log records nothing while off, records the page's lines once turned on from the settings page, downloads as a dated text file, clears, and stops recording when turned off; a channel excluded by handle on the settings page gets no lookup; the settings page shows a key row per provider. |
 
 | File | Role |
 | --- | --- |

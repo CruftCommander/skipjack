@@ -4,10 +4,10 @@
 import { createWebExtShell } from '../browser/shell';
 import { ChannelStore } from '../browser/channel-store';
 import { isGetChannelRequest, isUndoLastSkipRequest, type GetChannelResponse } from '../core/messages';
-import { normalizeSettings, SETTINGS_KEY } from '../core/settings';
+import { normalizeSettings, SETTINGS_KEY, type Settings } from '../core/settings';
 import { adapterFor } from '../platforms/registry';
 import { Toast } from '../ui/toast';
-import { log } from './log';
+import { log, LogForwarder, setLogSink } from './log';
 import { Session } from './session';
 
 declare const SKIPJACK_VERSION: string;
@@ -33,10 +33,23 @@ async function main(): Promise<void> {
   const toast = new Toast();
   let session: Session | null = null;
 
+  // The diagnostic log: while it is on, every line also goes to the background script to be kept.
+  const forwarder = new LogForwarder((entries) => (shell.isAlive() ? shell.sendMessage({ type: 'log', entries }) : Promise.resolve()));
+  const applyLogging = (s: Settings): void => {
+    if (s.diagnostics.log) setLogSink((entry) => forwarder.push(entry));
+    else {
+      forwarder.flush();
+      setLogSink(null);
+    }
+  };
+  applyLogging(settings);
+  addEventListener('pagehide', () => forwarder.flush());
+
   log.info(`${SKIPJACK_VERSION} on ${browserName()}, platform ${adapter.id}`);
 
   shell.onSyncedChanged(SETTINGS_KEY, (value) => {
     settings = normalizeSettings(value);
+    applyLogging(settings);
     session?.updateSettings(settings);
   });
   channels.onChanged((list) => {

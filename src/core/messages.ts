@@ -2,6 +2,7 @@
 
 import type { ChannelRef } from './channels';
 import type { DetectionInput } from '../llm/provider';
+import { isLogEntry, LOG_MAX_BATCH, type LogEntry } from './logbook';
 import type { MediaRef, Segment } from './types';
 
 export interface GetSegmentsRequest {
@@ -164,4 +165,38 @@ export function isDetectRequest(v: unknown): v is DetectRequest {
 
 export function isUndoLastSkipRequest(v: unknown): v is UndoLastSkipRequest {
   return !!v && typeof v === 'object' && (v as { type?: unknown }).type === 'undoLastSkip';
+}
+
+/** Content to background: lines for the diagnostic log. Stored only while the setting is on. */
+export interface LogRequest {
+  type: 'log';
+  entries: LogEntry[];
+}
+
+export type LogResponse = { ok: true; stored: boolean } | { ok: false; error: string };
+
+export function isLogRequest(v: unknown): v is LogRequest {
+  const r = v as Record<string, unknown> | null;
+  return (
+    !!r &&
+    r.type === 'log' &&
+    Array.isArray(r.entries) &&
+    r.entries.length > 0 &&
+    r.entries.length <= LOG_MAX_BATCH &&
+    r.entries.every(isLogEntry)
+  );
+}
+
+/**
+ * Settings page to background: delete the diagnostic log. Done in the background, where appends are
+ * queued, so a batch in flight cannot bring cleared lines back.
+ */
+export interface ClearLogRequest {
+  type: 'clearLog';
+}
+
+export type ClearLogResponse = { ok: true; removed: number } | { ok: false; error: string };
+
+export function isClearLogRequest(v: unknown): v is ClearLogRequest {
+  return !!v && typeof v === 'object' && (v as { type?: unknown }).type === 'clearLog';
 }

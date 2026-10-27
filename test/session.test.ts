@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { ChannelStore } from '../src/browser/channel-store';
 import type { ChannelRef } from '../src/core/channels';
 import { normalizeSettings } from '../src/core/settings';
+import { setLogSink } from '../src/content/log';
 import { Session } from '../src/content/session';
+import type { LogEntry } from '../src/core/logbook';
 import type { PlatformAdapter } from '../src/platforms/platform';
 import type { Toast } from '../src/ui/toast';
 import { FakeMedia, fakeShell } from './helpers';
@@ -78,7 +80,7 @@ test('a hold-back based on stale channel data is re-checked and resumes', async 
 
 // Detection in a session: what the content script does with the background's answers.
 
-function detectSetup(answer: (type: string) => Promise<unknown>) {
+function detectSetup(answer: (type: string) => Promise<unknown>, captionText = 'x', title?: string) {
   const shell = fakeShell();
   const sent: string[] = [];
   shell.sendMessage = (async (m: { type: string }) => {
@@ -98,7 +100,13 @@ function detectSetup(answer: (type: string) => Promise<unknown>) {
       transcripts++;
       return {
         ok: true,
-        input: { media: { platform: 'youtube', id: 'abcdefghijk' }, durationSeconds: 600, transcript: [{ start: 1, duration: 1, text: 'x' }], signals: {} },
+        input: {
+          media: { platform: 'youtube', id: 'abcdefghijk' },
+          durationSeconds: 600,
+          ...(title ? { title } : {}),
+          transcript: [{ start: 1, duration: 1, text: captionText }],
+          signals: {},
+        },
       };
     },
   } as unknown as PlatformAdapter;
@@ -182,5 +190,26 @@ test('a creator sponsor chapter is skipped with no key, and detection is not ask
     assert.deepEqual(sent, ['getSegments']);
   } finally {
     session.destroy();
+  }
+});
+
+test('the diagnostic log never receives caption text or the title, through a whole detection', async () => {
+  const lines: LogEntry[] = [];
+  setLogSink((e) => lines.push(e));
+  const t = detectSetup(
+    async (type) => (type === 'getSegments' ? community : type === 'detectionStatus' ? { ok: true, cached: null, keySet: true } : detected),
+    'this video is sponsored by Brightwave Mattresses',
+    'Secret Title Of The Video',
+  );
+  try {
+    await sleep(600);
+    assert.ok(lines.some((e) => /detecting with .* \(1 caption lines\)/.test(e.text)), lines.map((e) => e.text).join(' | '));
+    assert.ok(lines.some((e) => /1 detected segment/.test(e.text)), lines.map((e) => e.text).join(' | '));
+    for (const e of lines) {
+      assert.doesNotMatch(e.text, /Brightwave|Secret Title/);
+    }
+  } finally {
+    setLogSink(null);
+    t.session.destroy();
   }
 });

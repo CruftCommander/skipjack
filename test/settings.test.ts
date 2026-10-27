@@ -14,6 +14,7 @@ test('defaults match the decisions', () => {
   assert.deepEqual(d.minLength, { enabled: true, seconds: 5 });
   assert.equal(d.toast.enabled, true);
   assert.deepEqual(d.endOfVideo, { action: 'play', thresholdSeconds: 5 });
+  assert.deepEqual(d.diagnostics, { log: false });
 });
 
 test('partial settings keep the other defaults', () => {
